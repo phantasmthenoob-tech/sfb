@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: ai-market-simulator-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      # Replay boots paused; press Start, or set 1 to autostart.
+      - key: SIM_AUTOSTART
+        value: "0"
+      # Boot mode: replay (historical) or live (real quotes during the US session).
+      - key: SIM_MODE
+        value: "replay"
+      # Yahoo Finance market data: no API key required.
+      - key: MARKET_DATA_SOURCE
+        value: "yahoo"
+      - key: MARKET_DATA_REFRESH_HOURS
+        value: "24"
+      - key: MARKET_HISTORY_RANGE
+        value: "1y"
+      # Live mode cadence.
+      - key: LIVE_POLL_SECONDS
+        value: "60"
+      - key: LIVE_DECISION_SECONDS
+        value: "300"
+      # Comma-separated exact browser origins, e.g.
+      # https://my-dashboard.onrender.com,https://preview.example.com
+      # Set this in the Render dashboard after the static site URL is known.
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: ai-market-simulator-dashboard
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Build-time values; set both in the Render dashboard before the first build.
+      - key: VITE_API_BASE
+        sync: false
+      - key: VITE_WS_URL
+        sync: false

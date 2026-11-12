@@ -1,0 +1,193 @@
+"""HTTP and websocket contract tests."""
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import cors_origins, create_app
+
+from .conftest import make_settings
+
+
+@pytest.fixture
+def client(tmp_path):
+    settings = make_settings(tmp_path, replay_sessions=2, bars_per_session=30, agent_decision_every=5)
+    app = create_app(settings)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_health_and_simulation_status(client):
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    body = health.json()
+    assert body["status"] == "ok"
+    assert body["simulation"]["total_bars"] == 60
+    assert body["settings"]["starting_balance"] == 10000.0
+
+    status = client.get("/api/simulation/status").json()
+    assert status["status"] in {"paused", "running"}
+
+
+def test_leaderboard_starts_with_four_equal_accounts(client):
+    response = client.get("/api/leaderboard")
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert len(entries) == 4
+    assert [entry["rank"] for entry in entries] == [1, 2, 3, 4]
+    assert all(entry["starting_balance"] == 10000.0 for entry in entries)
+    assert all(entry["equity"] == 10000.0 for entry in entries)
+    kinds = {entry["kind"] for entry in entries}
+    assert kinds == {"agent", "manual"}
+
+
+def test_market_endpoints_payloads(client):
+    overview = client.get("/api/market/overview").json()
+    assert {quote["ticker"] for quote in overview["quotes"]} == set(overview["universe"])
+    assert len(overview["indices"]) == 2
+
+    quote = client.get("/api/market/quote/AAPL").json()
+    assert quote["price"] > 0
+    assert "change_pct" in quote
+
+    history = client.get("/api/market/history/AAPL?limit=10").json()
+    assert 1 <= len(history["bars"]) <= 10
+    assert history["bars"][-1]["bar_index"] == 0
+
+    news = client.get("/api/market/news/ALL").json()
+    assert isinstance(news["news"], list)
+
+    assert client.get("/api/market/quote/NOPE").status_code == 404
+
+
+def test_agents_endpoint_exposes_three_independent_portfolios(client):
+    agents = client.get("/api/agents").json()["agents"]
+    assert len(agents) == 3
+    assert {agent["model_type"] for agent in agents} == {"price", "news", "combined"}
+    portfolio_ids = {agent["portfolio"]["id"] for agent in agents}
+    assert len(portfolio_ids) == 3
+    for agent in agents:
+        assert agent["portfolio"]["starting_balance"] == 10000.0
+
+
+def test_manual_order_queues_then_fills_on_next_tick(client):
+    engine = client.app.state.engine
+    engine.play()
+    ticker = "AAPL"
+    response = client.post(
+        "/api/orders", json={"ticker": ticker, "side": "BUY", "quantity": 3}
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["status"] == "PENDING"
+    assert payload["order"]["status"] == "PENDING"
+
+    orders = client.get("/api/orders").json()["orders"]
+    assert orders[0]["status"] == "PENDING"
+
+    engine.tick()
+    engine.pause()
+
+    orders = client.get("/api/orders").json()["orders"]
+    assert orders[0]["status"] == "FILLED"
+    assert orders[0]["fill_price"] > 0
+    trades = client.get("/api/trades").json()["trades"]
+    assert trades[0]["side"] == "BUY"
+
+    manual = client.get("/api/portfolios/manual").json()
+    assert manual["positions"][0]["ticker"] == ticker
+    assert manual["positions"][0]["quantity"] == 3
+    assert manual["cash"] < 10000.0
+
+
+def test_ai_portfolios_reject_manual_orders(client):
+    agents = client.get("/api/agents").json()["agents"]
+    agent_portfolio_id = agents[0]["portfolio"]["id"]
+    response = client.post(
+        "/api/orders",
+        json={
+            "ticker": "AAPL",
+            "side": "BUY",
+            "quantity": 1,
+            "portfolio_id": agent_portfolio_id,
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_invalid_order_returns_reason(client):
+    response = client.post(
+        "/api/orders", json={"ticker": "WOOF", "side": "BUY", "quantity": 1}
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["reason"] == "unknown_ticker"
+
+
+def test_speed_control_validation(client):
+    assert client.post("/api/simulation/speed", json={"speed": 5}).status_code == 200
+    assert client.post("/api/simulation/speed", json={"speed": 7}).status_code == 400
+
+
+def test_simulation_reset_restores_accounts(client):
+    engine = client.app.state.engine
+    engine.play()
+    client.post("/api/orders", json={"ticker": "MSFT", "side": "BUY", "quantity": 2})
+    engine.tick()
+    engine.pause()
+
+    client.post("/api/simulation/reset")
+    manual = client.get("/api/portfolios/manual").json()
+    assert manual["cash"] == 10000.0
+    assert manual["positions"] == []
+    assert client.get("/api/trades").json()["trades"] == []
+
+
+def test_websocket_sends_snapshot(client):
+    with client.websocket_connect("/ws/market") as websocket:
+        payload = websocket.receive_json()
+    assert payload["type"] == "snapshot"
+    assert len(payload["leaderboard"]) == 4
+    assert payload["simulation"]["total_bars"] == 60
+    assert payload["manual"]["id"] > 0
+
+
+def test_cors_allows_configured_static_origins(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        " https://dashboard.example.com/ , https://preview.example.com ",
+    )
+    app = create_app(make_settings(tmp_path))
+    with TestClient(app) as client:
+        preflight = client.options(
+            "/api/leaderboard",
+            headers={
+                "Origin": "https://dashboard.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert preflight.status_code == 200
+        assert (
+            preflight.headers["access-control-allow-origin"]
+            == "https://dashboard.example.com"
+        )
+
+        allowed = client.get(
+            "/api/leaderboard", headers={"Origin": "https://preview.example.com"}
+        )
+        assert (
+            allowed.headers["access-control-allow-origin"]
+            == "https://preview.example.com"
+        )
+
+        blocked = client.get(
+            "/api/leaderboard", headers={"Origin": "https://evil.example.com"}
+        )
+        assert "access-control-allow-origin" not in blocked.headers
+
+
+def test_cors_origins_default_to_wildcard(monkeypatch):
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    assert cors_origins() == ["*"]
+
+    monkeypatch.setenv("CORS_ORIGINS", " , ")
+    assert cors_origins() == ["*"]
