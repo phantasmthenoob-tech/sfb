@@ -261,12 +261,114 @@ main {
   gap: 16px;
 }
 
-.overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+.forecasts {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: start;
 }
+
+.forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.forecast-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 4px 0 2px;
+}
+
+.forecast-move {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 42px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.forecast-arrow {
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.forecast-hero-copy {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.forecast-ticker {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.forecast-copy {
+  margin: 6px 0 4px;
+  max-width: 620px;
+  font-size: 13px;
+}
+
+.forecast-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.forecast-call {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.forecast-call:first-child {
+  padding-top: 2px;
+  border-top: 0;
+}
+
+.forecast-rank {
+  width: 16px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.forecast-call-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.forecast-call-line,
+.forecast-call-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.forecast-call-line .ticker {
+  font-size: 12px;
+}
+
+.forecast-call-line .mono {
+  font-weight: 600;
+}
+
+.forecast-call-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 
 .markets {
   display: grid;
@@ -614,22 +716,6 @@ main {
   color: var(--red);
 }
 
-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 12px 24px 28px;
-  font-size: 11px;
-  color: var(--faint);
-}
-
-.footer-sub {
-  color: var(--faint);
-}
-
 .data-note {
   margin: 10px 0 0;
   font-size: 11px;
@@ -640,7 +726,8 @@ footer {
 @media (max-width: 900px) {
   .overview,
   .markets,
-  .trading-top {
+  .trading-top,
+  .forecast-grid {
     grid-template-columns: 1fr;
   }
 
@@ -668,7 +755,4 @@ footer {
     padding: 16px;
   }
 
-  footer {
-    padding: 8px 16px 24px;
-  }
 }

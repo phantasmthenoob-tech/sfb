@@ -13,7 +13,7 @@ from ..config import Settings
 from ..database.repositories import Repository
 from ..trading.accounting import round_money
 from ..trading.portfolio import PortfolioState
-from .predictions import direction_for
+from .features import expected_move_pct
 
 
 @dataclass(frozen=True)
@@ -68,21 +68,46 @@ class BaseAgent(ABC):
         signals = [signal for signal in self.evaluate(context, state) if signal.ticker in context.prices]
         signals.sort(key=lambda signal: signal.score, reverse=True)
         self._last_scores = {signal.ticker: signal.score for signal in signals}
-        self._record_prediction(context, signals)
+        self._record_predictions(context, signals)
         return self._signals_to_intents(signals, context, state)
 
-    def _record_prediction(self, context: MarketContext, signals: list[Signal]) -> None:
+    def _record_predictions(self, context: MarketContext, signals: list[Signal]) -> None:
+        """Record this agent's top five expected moves, largest first."""
         if not signals:
             return
-        best = max(signals, key=lambda signal: abs(signal.score))
-        self.repo.insert_prediction(
+        ranked: list[tuple[float, float, float, Signal]] = []
+        for signal in signals:
+            bars = context.bars.get(signal.ticker, [])
+            expected = expected_move_pct(bars, signal.score)
+            if expected == 0:
+                continue
+            price = context.prices.get(signal.ticker) or (
+                bars[-1]["close"] if bars else 0.0
+            )
+            ranked.append((abs(expected), expected, price, signal))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        if not ranked:
+            return
+
+        self.repo.replace_predictions(
             agent_id=self.agent_id,
-            ticker=best.ticker,
-            horizon="short",
-            direction=direction_for(best.score, self.entry_threshold),
-            confidence=best.confidence,
-            rationale=best.rationale,
-            sim_time=context.sim_time,
+            rows=[
+                {
+                    "agent_id": self.agent_id,
+                    "ticker": signal.ticker,
+                    "horizon": "short",
+                    "direction": (
+                        "UP" if expected > 0 else "DOWN" if expected < 0 else "FLAT"
+                    ),
+                    "confidence": round(signal.confidence, 3),
+                    "expected_pct": expected,
+                    "price": round(float(price), 2),
+                    "rationale": signal.rationale,
+                    "sim_time": context.sim_time,
+                    "bar_index": context.bar_index,
+                }
+                for _magnitude, expected, price, signal in ranked[:5]
+            ],
         )
 
     def _signals_to_intents(

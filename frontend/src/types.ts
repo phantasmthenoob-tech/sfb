@@ -1,7 +1,7 @@
 export type SimulationStatus = "running" | "paused" | "completed";
 export type SimulationMode = "replay" | "live";
 export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
-export type Tab = "leaderboard" | "markets" | "trading" | "activity";
+export type Tab = "forecasts" | "leaderboard" | "markets" | "trading" | "activity";
 
 export interface LiveState {
   market_open: boolean;
@@ -109,11 +109,32 @@ export interface DataSourceInfo {
   live?: LiveState;
 }
 
+export interface ForecastCall {
+  rank: number;
+  ticker: string;
+  direction: "UP" | "DOWN" | "FLAT";
+  expected_pct: number;
+  price: number;
+  expected_usd: number;
+  confidence: number;
+  rationale: string;
+  sim_time: string;
+  bar_index: number;
+}
+
+export interface AgentForecast {
+  agent_id: number;
+  agent_name: string;
+  model_type: string;
+  calls: ForecastCall[];
+}
+
 export interface Snapshot {
   type: "snapshot";
   simulation: SimulationState;
   quotes: Quote[];
   indices: IndexQuote[];
+  forecasts: AgentForecast[];
   leaderboard: LeaderboardEntry[];
   manual: Portfolio | null;
   data: DataSourceInfo;

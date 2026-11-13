@@ -45,6 +45,7 @@ def test_market_endpoints_payloads(client):
     overview = client.get("/api/market/overview").json()
     assert {quote["ticker"] for quote in overview["quotes"]} == set(overview["universe"])
     assert len(overview["indices"]) == 2
+    assert isinstance(overview["forecasts"], list)
 
     quote = client.get("/api/market/quote/AAPL").json()
     assert quote["price"] > 0

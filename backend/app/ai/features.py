@@ -59,6 +59,21 @@ def technical_score(bars: list[dict]) -> dict | None:
     }
 
 
+def expected_move_pct(bars: list[dict], score: float, horizon: int = 5) -> float:
+    """Estimate the next ``horizon`` sessions' move from signal strength and volatility.
+
+    The score sets the direction and conviction; recent 20-day realized
+    volatility sets the scale (daily vol × √horizon). Bounded to ±15% so a
+    noisy signal cannot advertise an absurd payoff.
+    """
+    closes = [bar["close"] for bar in bars]
+    volatility = realized_volatility(closes)
+    if volatility is None or volatility <= 0:
+        return round(clamp(score * 3.0, -15.0, 15.0), 2)
+    estimate = score * volatility * math.sqrt(horizon) * 100.0
+    return round(clamp(estimate, -15.0, 15.0), 2)
+
+
 def sentiment_score(news_items: list[dict], ticker: str, min_bar: int) -> dict:
     """Average headline sentiment for a ticker inside the replay window."""
     relevant = [

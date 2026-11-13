@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, wsMarketUrl } from "../api/client";
 import type {
   DataSourceInfo,
+  AgentForecast,
   IndexQuote,
   LeaderboardEntry,
   Portfolio,
@@ -14,6 +15,7 @@ interface OverviewResponse {
   simulation: SimulationState;
   quotes: Quote[];
   indices: IndexQuote[];
+  forecasts: AgentForecast[];
   data: DataSourceInfo;
 }
 
@@ -43,6 +45,7 @@ export function useMarketStream() {
         simulation: overview.simulation,
         quotes: overview.quotes,
         indices: overview.indices,
+        forecasts: overview.forecasts ?? [],
         leaderboard: leaderboard.entries,
         manual,
         data: overview.data,

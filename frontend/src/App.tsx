@@ -1,27 +1,17 @@
 import { useCallback, useState } from "react";
 import { apiPost } from "./api/client";
 import { Activity } from "./components/Activity";
+import { Forecasts } from "./components/Forecasts";
 import { Header } from "./components/Header";
 import { Markets } from "./components/Markets";
 import { Overview } from "./components/Overview";
 import { Trading } from "./components/Trading";
 import { Loading } from "./components/ui";
 import { useMarketStream } from "./hooks/useMarketStream";
-import { simDate } from "./lib/format";
 import type { Tab } from "./types";
 
-function liveUpdated(iso?: string | null): string {
-  if (!iso) return "waiting for the first poll";
-  const time = new Date(iso).toLocaleTimeString("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  return `updated ${time} ET`;
-}
-
 const TABS: { id: Tab; label: string }[] = [
+  { id: "forecasts", label: "Forecasts" },
   { id: "leaderboard", label: "Leaderboard" },
   { id: "markets", label: "Markets" },
   { id: "trading", label: "Trading" },
@@ -81,6 +71,8 @@ export default function App() {
 
         {!snapshot ? (
           <Loading label="Connecting…" />
+        ) : tab === "forecasts" ? (
+          <Forecasts snapshot={snapshot} />
         ) : tab === "leaderboard" ? (
           <Overview snapshot={snapshot} />
         ) : tab === "markets" ? (
@@ -92,23 +84,6 @@ export default function App() {
         )}
       </main>
 
-      <footer>
-        {snapshot
-          ? snapshot.simulation.mode === "live"
-            ? `Prices: ${snapshot.data.label} · live quotes · ${liveUpdated(
-                snapshot.simulation.live?.last_poll,
-              )}`
-            : `Prices: ${snapshot.data.label} · daily closes · data through ${simDate(
-                snapshot.data.last_bar_date ?? undefined,
-              )}`
-          : "Connecting to market data…"}
-        <span className="footer-sub">
-          {snapshot?.simulation.live?.error
-            ? `${snapshot.simulation.live.error} · `
-            : ""}
-          Simulated portfolios and headlines · not investment advice
-        </span>
-      </footer>
     </div>
   );
 }

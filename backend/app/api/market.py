@@ -26,6 +26,7 @@ def market_overview(
         "indices": data_provider.index_levels(
             prices, engine.reference_prices(), engine.settings.universe
         ),
+        "forecasts": engine.forecasts_payload(),
         "universe": list(engine.settings.universe),
         "data": engine.data_payload(),
         "data_note": "Simulated portfolios marked to real daily closes. Not investment advice.",

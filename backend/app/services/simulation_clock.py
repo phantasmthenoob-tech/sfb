@@ -706,6 +706,39 @@ class SimulationEngine:
                 quotes.append(quote_payload(ticker, bar, previous.get(ticker)))
         return quotes
 
+    def forecasts_payload(self) -> list[dict]:
+        """Each AI's top five expected moves, largest first, for the dashboard."""
+        if not self.timeline:
+            return []
+        groups: dict[int, dict] = {}
+        for row in self.repo.latest_forecasts(self.cursor):
+            group = groups.setdefault(
+                row["agent_id"],
+                {
+                    "agent_id": row["agent_id"],
+                    "agent_name": row.get("agent_name") or "AI",
+                    "model_type": row.get("model_type") or "",
+                    "calls": [],
+                },
+            )
+            price = float(row["price"] or 0.0)
+            expected = float(row["expected_pct"] or 0.0)
+            group["calls"].append(
+                {
+                    "rank": len(group["calls"]) + 1,
+                    "ticker": row["ticker"],
+                    "direction": row["direction"],
+                    "expected_pct": expected,
+                    "price": round(price, 2),
+                    "expected_usd": round(price * expected / 100.0, 2),
+                    "confidence": row["confidence"],
+                    "rationale": row["rationale"],
+                    "sim_time": row["sim_time"],
+                    "bar_index": row["bar_index"],
+                }
+            )
+        return [groups[agent_id] for agent_id in sorted(groups)]
+
     def snapshot(self) -> dict:
         status = self.status_payload()
         quotes = self.quotes_payload()
@@ -723,6 +756,7 @@ class SimulationEngine:
             "simulation": status,
             "quotes": quotes,
             "indices": indices,
+            "forecasts": self.forecasts_payload(),
             "leaderboard": leaderboard,
             "manual": manual,
             "data": self.data_payload(),

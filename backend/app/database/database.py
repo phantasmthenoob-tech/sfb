@@ -74,8 +74,11 @@ CREATE TABLE IF NOT EXISTS predictions (
     horizon TEXT NOT NULL,
     direction TEXT NOT NULL,
     confidence REAL NOT NULL,
+    expected_pct REAL NOT NULL DEFAULT 0,
+    price REAL NOT NULL DEFAULT 0,
     rationale TEXT NOT NULL DEFAULT '',
-    sim_time TEXT NOT NULL
+    sim_time TEXT NOT NULL,
+    bar_index INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS market_data (
@@ -168,6 +171,22 @@ class Database:
             if "mode" not in columns:
                 self._conn.execute(
                     "ALTER TABLE simulation_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'replay'"
+                )
+            prediction_columns = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(predictions)")
+            }
+            if "expected_pct" not in prediction_columns:
+                self._conn.execute(
+                    "ALTER TABLE predictions ADD COLUMN expected_pct REAL NOT NULL DEFAULT 0"
+                )
+            if "bar_index" not in prediction_columns:
+                self._conn.execute(
+                    "ALTER TABLE predictions ADD COLUMN bar_index INTEGER NOT NULL DEFAULT 0"
+                )
+            if "price" not in prediction_columns:
+                self._conn.execute(
+                    "ALTER TABLE predictions ADD COLUMN price REAL NOT NULL DEFAULT 0"
                 )
             self._conn.commit()
 

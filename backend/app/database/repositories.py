@@ -311,33 +311,109 @@ class Repository:
         horizon: str,
         direction: str,
         confidence: float,
+        expected_pct: float = 0.0,
+        price: float = 0.0,
         rationale: str,
         sim_time: str,
+        bar_index: int = 0,
     ) -> None:
         with self.db.transaction() as conn:
             conn.execute(
                 """
-                INSERT INTO predictions (agent_id, ticker, horizon, direction, confidence, rationale, sim_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO predictions
+                    (agent_id, ticker, horizon, direction, confidence, expected_pct, price, rationale, sim_time, bar_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (agent_id, ticker, horizon, direction, round(confidence, 3), rationale, sim_time),
+                (
+                    agent_id,
+                    ticker,
+                    horizon,
+                    direction,
+                    round(confidence, 3),
+                    round(expected_pct, 2),
+                    round(price, 2),
+                    rationale,
+                    sim_time,
+                    bar_index,
+                ),
             )
+
+    def replace_predictions(self, *, agent_id: int, rows: Iterable[dict]) -> None:
+        """Replace one agent's calls for a bar with its new top five."""
+        batch = list(rows)
+        if not batch:
+            return
+        with self.db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM predictions WHERE agent_id = ? AND bar_index = ?",
+                (agent_id, batch[0]["bar_index"]),
+            )
+            conn.executemany(
+                """
+                INSERT INTO predictions
+                    (agent_id, ticker, horizon, direction, confidence, expected_pct, price, rationale, sim_time, bar_index)
+                VALUES (:agent_id, :ticker, :horizon, :direction, :confidence, :expected_pct, :price, :rationale, :sim_time, :bar_index)
+                """,
+                batch,
+            )
+
+    def latest_forecasts(self, bar_index: int, per_agent: int = 5) -> list[dict]:
+        """The latest batch of calls per agent, biggest expected move first."""
+        rows = self.db.query(
+            """
+            SELECT pr.*, a.name AS agent_name, a.model_type
+            FROM predictions pr JOIN agents a ON a.id = pr.agent_id
+            JOIN (
+                SELECT agent_id, MAX(bar_index) AS bar_index
+                FROM predictions WHERE bar_index <= ? GROUP BY agent_id
+            ) latest
+              ON latest.agent_id = pr.agent_id AND latest.bar_index = pr.bar_index
+            ORDER BY pr.agent_id, ABS(pr.expected_pct) DESC, pr.id DESC
+            """,
+            (bar_index,),
+        )
+        counts: dict[int, int] = {}
+        selected: list[dict] = []
+        for row in rows:
+            used = counts.get(row["agent_id"], 0)
+            if used >= per_agent:
+                continue
+            counts[row["agent_id"]] = used + 1
+            selected.append(row)
+        return selected
+
+    def latest_predictions(self, bar_index: int) -> list[dict]:
+        """Each agent's most recent call at or before the clock, biggest estimate first."""
+        return self.db.query(
+            """
+            SELECT pr.*, a.name AS agent_name, a.model_type
+            FROM predictions pr JOIN agents a ON a.id = pr.agent_id
+            WHERE pr.id IN (
+                SELECT MAX(id) FROM predictions WHERE bar_index <= ? GROUP BY agent_id
+            )
+            ORDER BY ABS(pr.expected_pct) DESC, pr.confidence DESC
+            """,
+            (bar_index,),
+        )
 
     def list_predictions(self, agent_id: int | None = None, limit: int = 50) -> list[dict]:
         if agent_id is None:
             return self.db.query(
                 """
-                SELECT pr.*, a.name AS agent_name
-                FROM predictions pr JOIN agents a ON a.id = pr.agent_id
-                ORDER BY pr.id DESC LIMIT ?
-                """,
+                            SELECT pr.*, a.name AS agent_name, a.model_type
+            FROM predictions pr JOIN agents a ON a.id = pr.agent_id
+            ORDER BY pr.bar_index DESC, ABS(pr.expected_pct) DESC, pr.id DESC
+            LIMIT ?
+            """,
                 (limit,),
             )
         return self.db.query(
             """
-            SELECT pr.*, a.name AS agent_name
+            SELECT pr.*, a.name AS agent_name, a.model_type
             FROM predictions pr JOIN agents a ON a.id = pr.agent_id
-            WHERE pr.agent_id = ? ORDER BY pr.id DESC LIMIT ?
+            WHERE pr.agent_id = ?
+            ORDER BY pr.bar_index DESC, ABS(pr.expected_pct) DESC, pr.id DESC
+            LIMIT ?
             """,
             (agent_id, limit),
         )
