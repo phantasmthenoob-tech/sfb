@@ -13,9 +13,9 @@ The first backend commit is on **11/11/26**; the first frontend commit is on
 **11/18/26**. The journal then follows the project through launch, the first
 users, the ugly deployment failures, the quieter hardening work, and a long
 post-launch period of experiments, dead ends and architecture decisions, ending
-on **01/05/27**.
+on **01/06/27**.
 
-There are **53 entries** across **58 dates**. Five dates are deliberately
+There are **54 entries** across **59 dates**. Five dates are deliberately
 unlogged: **11/15/26, 11/21/26, 11/22/26, 11/28/26 and 11/29/26**. Those were
 full rest days. Every other date in the range has an entry, including the
 weekends and holidays when I worked lightly. The 11/14 entry is a logged light
@@ -54,7 +54,8 @@ honest version of the plan at night.
 | 12/13/26–12/19/26 | Postgres and delta-WebSocket experiments | Both ideas were correct in theory and wrong for this app |
 | 12/20/26–12/26/26 | Mobile polish, live holidays, Yahoo outage, disk rehearsal | Operational reality after launch |
 | 12/27/26–01/01/27 | SSR, auth and rate-limit prototypes | Scope explosions before the final freeze |
-| 01/02–01/05/27 | Architecture records, regression pass, final close | The last decisions were about what not to build |
+| 01/02–01/05/27 | Architecture records, regression pass, final docs | The last decisions were about what not to build |
+| 01/06/27 | Render sleep and live mode | The engine was fine; the service was asleep |
 
 ---
 
@@ -2695,12 +2696,12 @@ The final build was live. The docs matched the build. The screenshot was honest.
 
 ## Day 53 — 01/05/27
 
-### Morning: the last entry
+### Morning: the entry I thought was last
 
-I opened the journal to write the final entry and realized I had been keeping it
-for almost two months. It started with a Figma file and no repository. It ended
-with a live app, 53 entries, five unlogged rest days, a pile of deleted branches and a
-much better understanding of what “done” means.
+I opened the journal to write what I thought would be the final entry and
+realized I had been keeping it for almost two months. It started with a Figma
+file and no repository. It had reached 53 entries, five unlogged rest days, a
+pile of deleted branches and a much better understanding of what “done” means.
 
 I read the first entry again. I had written: “No repository. No backend. No
 frontend. Just a design direction.” That version of me was impatient and a little
@@ -2726,13 +2727,90 @@ rules. Writing that down was more useful than pretending I had been disciplined.
 
 ### Evening: closing the laptop
 
-I closed the laptop at 4:50 p.m. The app was live. The journal was complete. The
-remaining backlog was real but not urgent. I did not feel the urge to check the
-logs one more time.
+I closed the laptop at 4:50 p.m. The app was live. The journal looked complete.
+The remaining backlog was real but not urgent. I did not feel the urge to check
+the logs one more time.
 
 The project is a paper-trading simulator. It is also a record of learning when
 to stop, when to delete, and when to admit that a simple answer is the right one.
-I am glad I built it. I am glad it is finished.
+I am glad I built it. I am glad the main build is finished.
+
+### End of the main build
+
+---
+
+## Day 54 — 01/06/27
+
+### Morning: “the live thing is not doing anything”
+
+The message arrived before I had finished my coffee: “The live thing I don’t
+think is working really, because Render is on the free plan and goes off without
+activity, so it’s not actually making forecasts and stock transactions.”
+
+My first reaction was defensive. The live loop worked. I had tested it. Then I
+opened the Render dashboard and felt the floor tilt. The service had been asleep
+for most of the night. The logs showed a clean shutdown after an idle period and
+a cold start when the user opened the page. There were no errors because nothing
+had been running to produce one.
+
+The engine was fine. The service was not awake.
+
+### Afternoon: the difference between “live” and “always on”
+
+I had been thinking about live mode as a property of the code. If `SIM_MODE=live`
+and the market was open, the poll ran, the agents decided, and orders filled.
+That is true only while the process is alive. A free Render web service sleeps
+after roughly fifteen minutes without incoming traffic. When it sleeps, the
+background clock stops. No requests, no polls, no forecasts, no fills.
+
+The dashboard’s WebSocket did not save it. An open tab may or may not count as
+traffic for long enough, depending on the platform and the browser tab’s state.
+A closed tab definitely does not. The user had done the most natural thing in
+the world: closed the laptop and expected the live simulation to continue.
+
+I felt embarrassed. I had documented the free-tier filesystem reset but not the
+free-tier sleep. The app looked live, so I had let myself believe it was live. It
+was live only when someone was watching.
+
+### Evening: two wake-up paths
+
+I added a small frontend heartbeat. While the dashboard is open, the stream hook
+calls `/api/health` every four minutes. It is not a data refresh; the WebSocket
+still carries snapshots. It is a deliberate request to keep the instance from
+idling out.
+
+For the no-browser case, I added `.github/workflows/keep-alive.yml`. It runs
+every five minutes on GitHub Actions and pings the same health endpoint. That is
+an external clock the app does not have to own. It can also be triggered
+manually from the Actions tab.
+
+Neither solution is perfect. GitHub Actions schedules can be delayed, and
+scheduled workflows are disabled after long repository inactivity. A free
+instance can still sleep if the pinger fails. For a demo, the combination is
+good enough to keep the simulation alive most of the time. For reliable 24/7
+trading, the honest answer is a paid instance or an external uptime monitor.
+
+I also clarified the behavior after a wake-up: the live clock resumes from the
+current time. It does not replay the hours it missed. There is no backfill of
+forecasts or fills for the sleeping period. That is the correct behavior for a
+live simulation, but it means “live” cannot mean “continuous” on a free tier.
+
+### Late evening: the engine was never the bug
+
+I ran the live mode locally one more time with the market open and watched a
+decision, a forecast batch and a fill. Everything worked. The only thing that
+had been broken was the assumption that a sleeping service is still running.
+
+I added a note to the README, a new entry to the journal, and a small apology to
+the user. “You were right,” I wrote. “The engine was fine. The host was asleep.”
+It was the least dramatic bug of the project and the most important operational
+lesson: an app is not live just because its code says live.
+
+### End of day
+
+The heartbeat and the scheduled ping were in place. The limitation was written
+down. The engine still could not run while the computer was off, but at least
+now something else was knocking on the door.
 
 ### End of journal
 

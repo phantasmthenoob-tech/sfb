@@ -96,11 +96,19 @@ export function useMarketStream() {
     const poll = window.setInterval(() => {
       if (!disposed && !connectedRef.current) void refresh();
     }, 3000);
+    // Keep a free-tier backend from idling out while the dashboard is open.
+    // The full snapshot still arrives over the websocket; this is only a wake-up.
+    const keepAlive = window.setInterval(() => {
+      if (!disposed) {
+        void apiGet<{ status: string }>("/api/health").catch(() => undefined);
+      }
+    }, 4 * 60 * 1000);
 
     return () => {
       disposed = true;
       window.clearTimeout(retryTimer);
       window.clearInterval(poll);
+      window.clearInterval(keepAlive);
       socket?.close();
     };
   }, [refresh]);

@@ -1382,6 +1382,27 @@ Render's free filesystem is ephemeral: SQLite data and trade history reset on
 restart/redeploy. Attach a Render disk and set `DB_PATH` to a path on it for
 durable results.
 
+#### Free-tier sleep and live mode
+
+A free Render web service sleeps after roughly 15 minutes without incoming
+traffic. When it sleeps, the background clock and live poll stop, so forecasts
+and fills pause until a request wakes the service again. An open dashboard is
+not a guaranteed keep-alive, and a closed tab definitely is not.
+
+This repository includes two wake-up paths:
+
+- The frontend calls `/api/health` every four minutes while the dashboard is
+  open.
+- `.github/workflows/keep-alive.yml` runs every five minutes and pings the same
+  health endpoint, keeping the service awake with no browser open. It can also
+  be started manually from the Actions tab.
+
+Scheduled GitHub Actions can be delayed and are disabled after long repository
+inactivity. For reliable 24/7 live trading, use a paid Render instance or an
+external uptime monitor, and confirm the workflow is running. Live decisions
+still only occur while the US market is open; after hours the last forecasts are
+shown and no new fills occur.
+
 ### Frontend on a static host
 
 Build:
