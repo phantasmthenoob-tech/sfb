@@ -13,21 +13,27 @@ The first backend commit is on **11/11/26**; the first frontend commit is on
 **11/18/26**. The journal then follows the project through launch, the first
 users, the ugly deployment failures, the quieter hardening work, and a long
 post-launch period of experiments, dead ends and architecture decisions, ending
-on **01/06/27**.
+on **01/07/27**.
 
-There are **54 entries** across **59 dates**. Five dates are deliberately
-unlogged: **11/15/26, 11/21/26, 11/22/26, 11/28/26 and 11/29/26**. Those were
-full rest days. Every other date in the range has an entry, including the
-weekends and holidays when I worked lightly. The 11/14 entry is a logged light
-day, not a skipped one.
+There are **55 entries** across **60 dates**. Some days are not listed. I have
+a lot of homework now and I take breaks, so **11/15/26, 11/21/26, 11/22/26,
+11/28/26 and 11/29/26** are full rest days rather than missing work. Every other
+date in the range has an entry, including the weekends and holidays when I
+worked lightly. The 11/14 entry is a logged light day, not a skipped one.
 
-I wrote most of this at the end of each day, which is why it has the shape it
-does: a plan in the morning, a problem in the afternoon, and a slightly more
-honest version of the plan at night.
+These entries are written at the end of each day, which is why they have the
+shape they do: a plan in the morning, coding and debugging in the middle, a
+problem in the afternoon, and a slightly more honest version of the plan at
+night. Some days do not have a dramatic problem. I left those days quiet
+instead of inventing one.
+
+I started on **11/09/26**, but I did not make a document version of that first
+entry at the time. I am copying the early notes onto this document now, so the
+first few days are reconstructed rather than pasted from a daily file.
 
 ## Timeline at a glance
 
-| Date | Main focus | Defining problem |
+| Date | Main focus | Defining moment |
 | --- | --- | --- |
 | 11/09/26 | Figma discovery and wireframes | The first dashboard tried to show everything |
 | 11/10/26 | Figma system, prototype and sign-off | Design was “done” but the handoff was not |
@@ -56,6 +62,7 @@ honest version of the plan at night.
 | 12/27/26–01/01/27 | SSR, auth and rate-limit prototypes | Scope explosions before the final freeze |
 | 01/02–01/05/27 | Architecture records, regression pass, final docs | The last decisions were about what not to build |
 | 01/06/27 | Render sleep and live mode | The engine was fine; the service was asleep |
+| 01/07/27 | Forecast lookbacks and Predict now | A quiet day; deciding what the model should admit it sees |
 
 ---
 
@@ -2811,6 +2818,92 @@ lesson: an app is not live just because its code says live.
 The heartbeat and the scheduled ping were in place. The limitation was written
 down. The engine still could not run while the computer was off, but at least
 now something else was knocking on the door.
+
+---
+
+## Day 55 — 01/07/27
+
+### Morning: showing the model its own field of view
+
+The request was two things: show how far back the models look, and add a button
+that makes a prediction immediately instead of waiting for the clock.
+
+I wrote the plan on a sticky note before opening the editor: expose the lookback
+windows from the engine, render them above the calls, add a record-only
+prediction path to the API, wire a button to it, and write a test that proves the
+button does not trade. That was the whole plan. No new model, no new data
+source, no redesign.
+
+The honest answer to “how far back” is shorter than people expect. The price
+model uses a 20-session slow average and 10 sessions of momentum. The news model
+looks at the last five sessions. Volatility uses 20 sessions, and the forecast
+horizon is five sessions. The context loads up to 120 bars so the history
+endpoint and debugging have room, but the models only read their own windows.
+Calling them neural networks would be generous; they are three transparent
+heuristics with fixed inputs.
+
+### Midday: separating prediction from trading
+
+The code made this easier than I expected. `BaseAgent.step()` did three jobs:
+evaluate the signals, record the top five forecasts, and turn the signals into
+order intents. I split out `_collect_signals()` and added
+`record_forecasts()`. `CompetitionManager` got a shared `_context()` helper and a
+`run_forecasts()` method that calls the record-only path for every agent. The
+new route is `POST /api/market/forecasts/refresh`.
+
+The one thing I had to be careful about was not taking a shortcut. If the button
+had called `step()` and thrown away the returned intents, the forecasts would
+have looked right but every press would have queued trades. That is exactly the
+kind of bug that survives a happy-path test and surprises someone later. I kept
+the manual path separate and added a test that checks the order count before and
+after a refresh.
+
+### Afternoon: a day without a fire
+
+The backend tests passed on the first full run: 53 of them. The frontend
+typecheck and production build passed too. I kept waiting for a red line or a
+stack trace. Nothing came.
+
+The only friction was layout. The five lookback labels and the button fought for
+the same row on a narrow screen, so I moved the button into its own actions
+group and let the labels wrap underneath. That was the whole afternoon problem.
+I am trying not to turn every entry into a postmortem; some days are a clean
+diff and a green test run, and that is allowed.
+
+I still checked the awkward cases: paused, after hours, and an early bar without
+enough history. The button returns fewer calls when there is not enough data.
+In live mode it uses the latest visible bar, which may be the last poll rather
+than a brand-new quote. After hours it uses the last session. It does not invent
+bars to make the screen look busy.
+
+I also worried the button would read like a “make money now” control. The copy
+says it refreshes calls without placing orders, and the test enforces that. A
+forecast is still a forecast, not a trade.
+
+### Evening: the honest version
+
+The feature changes how the app feels. Before, predictions appeared when the
+clock decided. Now you can ask for them. That is better for a demo and better
+when I am debugging, but it could also encourage checking the tab too often and
+treating five ranked calls as a stronger signal than they are. The models are
+still looking at a fixed window of the past. The button makes them answer
+sooner; it does not make them see further.
+
+There is also a deployment gap I do not want to hide. The code is committed and
+pushed, but the live dashboard and backend still have to be rebuilt from this
+commit. If the Render service deploys from a separate backend repository, these
+changes have to go there too. The endpoint works locally; I am not going to
+claim the button works in production until it has been deployed.
+
+I closed the laptop at 6:10 p.m. and did some homework. No fire, no dramatic
+last-minute fix, no lesson about resilience. Just a small feature that made the
+model explain its inputs and let me ask for an answer without waiting. Some days
+are like that.
+
+### End of day
+
+The lookbacks were visible, the button was wired to a record-only path, and the
+tests proved it did not trade. The day was done.
 
 ### End of journal
 
