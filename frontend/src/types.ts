@@ -129,12 +129,23 @@ export interface AgentForecast {
   calls: ForecastCall[];
 }
 
+export interface ForecastMeta {
+  price_lookback_sessions: number;
+  momentum_lookback_sessions: number;
+  news_lookback_sessions: number;
+  volatility_lookback_sessions: number;
+  forecast_horizon_sessions: number;
+  max_bars_loaded: number;
+  note: string;
+}
+
 export interface Snapshot {
   type: "snapshot";
   simulation: SimulationState;
   quotes: Quote[];
   indices: IndexQuote[];
   forecasts: AgentForecast[];
+  forecast_meta?: ForecastMeta;
   leaderboard: LeaderboardEntry[];
   manual: Portfolio | null;
   data: DataSourceInfo;

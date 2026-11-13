@@ -72,7 +72,7 @@ export default function App() {
         {!snapshot ? (
           <Loading label="Connecting…" />
         ) : tab === "forecasts" ? (
-          <Forecasts snapshot={snapshot} />
+          <Forecasts snapshot={snapshot} onRefresh={refresh} />
         ) : tab === "leaderboard" ? (
           <Overview snapshot={snapshot} />
         ) : tab === "markets" ? (

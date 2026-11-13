@@ -27,10 +27,17 @@ def market_overview(
             prices, engine.reference_prices(), engine.settings.universe
         ),
         "forecasts": engine.forecasts_payload(),
+        "forecast_meta": engine.forecast_meta(),
         "universe": list(engine.settings.universe),
         "data": engine.data_payload(),
         "data_note": "Simulated portfolios marked to real daily closes. Not investment advice.",
     }
+
+
+@router.post("/forecasts/refresh")
+def refresh_forecasts(engine: SimulationEngine = Depends(get_engine)) -> dict:
+    """Ask every AI for predictions immediately; this never submits orders."""
+    return engine.refresh_forecasts()
 
 
 @router.get("/quote/{ticker}")

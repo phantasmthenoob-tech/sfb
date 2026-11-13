@@ -267,6 +267,48 @@ main {
   gap: 16px;
 }
 
+.forecast-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.forecast-lookback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.forecast-lookback strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.forecast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.forecast-status {
+  max-width: 380px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.forecast-status-error {
+  color: var(--red);
+}
+
 .forecast-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -3,6 +3,7 @@ import { apiGet, wsMarketUrl } from "../api/client";
 import type {
   DataSourceInfo,
   AgentForecast,
+  ForecastMeta,
   IndexQuote,
   LeaderboardEntry,
   Portfolio,
@@ -16,6 +17,7 @@ interface OverviewResponse {
   quotes: Quote[];
   indices: IndexQuote[];
   forecasts: AgentForecast[];
+  forecast_meta?: ForecastMeta;
   data: DataSourceInfo;
 }
 
@@ -46,6 +48,7 @@ export function useMarketStream() {
         quotes: overview.quotes,
         indices: overview.indices,
         forecasts: overview.forecasts ?? [],
+        forecast_meta: overview.forecast_meta,
         leaderboard: leaderboard.entries,
         manual,
         data: overview.data,

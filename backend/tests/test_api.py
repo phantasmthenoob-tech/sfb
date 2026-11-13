@@ -46,6 +46,13 @@ def test_market_endpoints_payloads(client):
     assert {quote["ticker"] for quote in overview["quotes"]} == set(overview["universe"])
     assert len(overview["indices"]) == 2
     assert isinstance(overview["forecasts"], list)
+    assert overview["forecast_meta"]["news_lookback_sessions"] == 5
+
+    refreshed = client.post("/api/market/forecasts/refresh")
+    assert refreshed.status_code == 200
+    refreshed_body = refreshed.json()
+    assert isinstance(refreshed_body["forecasts"], list)
+    assert refreshed_body["forecast_meta"]["forecast_horizon_sessions"] == 5
 
     quote = client.get("/api/market/quote/AAPL").json()
     assert quote["price"] > 0

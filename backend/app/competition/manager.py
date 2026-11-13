@@ -51,25 +51,39 @@ class CompetitionManager:
         self.agents = agents
         return agents
 
-    def run_decisions(
+    def _context(
         self, *, bar_index: int, sim_time: str, prices: dict[str, float]
-    ) -> list[dict]:
-        """Ask every agent for intents, then route them through the order manager."""
-        if not self.agents:
-            self.load_agents()
-
+    ) -> MarketContext:
         bars = {
             ticker: self.repo.bars_for(ticker, up_to=bar_index, limit=120)
             for ticker in self.settings.universe
         }
         news = list(reversed(self.repo.news_up_to(bar_index, limit=600)))
-        context = MarketContext(
+        return MarketContext(
             sim_time=sim_time,
             bar_index=bar_index,
             prices=prices,
             bars=bars,
             news=news,
         )
+
+    def run_forecasts(
+        self, *, bar_index: int, sim_time: str, prices: dict[str, float]
+    ) -> None:
+        """Record fresh forecasts for every agent without submitting orders."""
+        if not self.agents:
+            self.load_agents()
+        context = self._context(bar_index=bar_index, sim_time=sim_time, prices=prices)
+        for agent in self.agents:
+            agent.record_forecasts(context)
+
+    def run_decisions(
+        self, *, bar_index: int, sim_time: str, prices: dict[str, float]
+    ) -> list[dict]:
+        """Ask every agent for intents, then route them through the order manager."""
+        if not self.agents:
+            self.load_agents()
+        context = self._context(bar_index=bar_index, sim_time=sim_time, prices=prices)
         submitted_at = datetime.now(timezone.utc).isoformat()
         submitted: list[dict] = []
         for agent in self.agents:

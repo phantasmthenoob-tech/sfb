@@ -544,6 +544,25 @@ The shared technical score uses:
 It needs at least 20 closes (and 11 for momentum). When there is not enough
 history it returns no signal.
 
+### History windows
+
+The models never see the future. Each one reads a fixed window ending at the
+current replay or live bar:
+
+| Input | Lookback |
+| --- | --- |
+| Price trend | 5-session and 20-session moving averages |
+| Price momentum | 10 sessions |
+| News sentiment | Last 5 sessions |
+| Realized volatility | Last 20 sessions |
+| Forecast horizon | Next 5 sessions |
+| Bars loaded into the context | Up to 120 |
+
+The context loads more bars than the models use so the history endpoint and
+debugging have room; the scoring windows above are the actual limits. The
+Forecasts tab shows these lookbacks above the calls, and
+`overview.forecast_meta` exposes the same values to API clients.
+
 ### The three strategies
 
 | Agent | Signal | Entry threshold | Exit threshold | Max entries | Long target | Short target |
@@ -613,6 +632,17 @@ large rise.
   data at or before the current cursor.
 - Agents need enough history; early bars can produce fewer than five calls.
 - Switching mode or resetting clears all forecasts.
+
+### Running a prediction immediately
+
+The **Predict now** button on the Forecasts tab calls
+`POST /api/market/forecasts/refresh`. It runs all three agents against the
+latest visible bar and replaces that bar's batch, without submitting orders or
+waiting for the next replay tick or live decision interval. It works while
+paused and after hours, but it cannot invent bars: with too little visible
+history it returns fewer calls, and after hours it uses the last available
+session. The response includes `forecasts`, `forecast_meta`, `sim_time` and
+`generated_at`.
 
 The Forecasts tab shows the latest batch per agent, not a full forecast history.
 History is available from `/api/predictions` and
@@ -934,6 +964,7 @@ helpers are included where they carry behavior worth knowing.
 | | `Signal` | Ticker, score, confidence and rationale. |
 | | `BaseAgent.evaluate()` | Abstract strategy method. |
 | | `BaseAgent.step()` | Evaluate, filter, sort, record forecasts, then produce intents. |
+| | `BaseAgent.record_forecasts()` | Evaluate and record a fresh top five without producing intents. Used by manual prediction. |
 | | `BaseAgent._record_predictions()` | Rank non-zero estimates by absolute move and replace the agent's top five for the bar. |
 | | `BaseAgent._signals_to_intents()` | Entry/exit decisions and per-position sizing. |
 | | `BaseAgent._shares_for()` | Floor a dollar budget to whole shares. |
@@ -1018,7 +1049,8 @@ All responses are JSON unless noted.
 
 | Method | Path | Query/params | Purpose |
 | --- | --- | --- | --- |
-| GET | `/api/market/overview` | none | Simulation status, quotes, indices, forecasts, universe and data-source info. |
+| GET | `/api/market/overview` | none | Simulation status, quotes, indices, forecasts, `forecast_meta`, universe and data-source info. |
+| POST | `/api/market/forecasts/refresh` | none | Run all three AIs now and record fresh calls without placing orders. |
 | GET | `/api/market/quote/{ticker}` | path ticker | Current bar quote for a universe ticker. 404 for unknown ticker or missing bar. |
 | GET | `/api/market/history/{ticker}` | `limit` 1–780, default 200 | Visible bars up to the cursor plus SMA5/SMA20 and data info. |
 | GET | `/api/market/news/{ticker}` | path ticker; `limit` 1–100, default 30 | Visible headlines for a ticker, or `ALL`/`MARKET`. |
@@ -1466,11 +1498,11 @@ Test files cover:
 | `test_replay.py` | Clock gating, pause/reset, decisions, pending fills, session borrow accrual and completion. |
 | `test_market_data.py` | Yahoo parsing, calendar alignment, cache reuse, append refresh, synthetic fallback and retry behavior. |
 | `test_live_mode.py` | Live quote parsing, market-open detection, forming bars, live fills and mode switching. |
-| `test_api.py` | Health, overview, leaderboard, manual orders, agent isolation and WebSocket payloads. |
-| `test_forecasts.py` | Expected-move direction/bounds, top-five recording, rank order, per-share math and snapshot wiring. |
+| `test_api.py` | Health, overview, forecast refresh, leaderboard, manual orders, agent isolation and WebSocket payloads. |
+| `test_forecasts.py` | Expected-move direction/bounds, top-five recording, rank order, per-share math, manual refresh and snapshot wiring. |
 | `test_yahoo_http.py` | Retryable statuses, backoff, `Retry-After` and attempt limits. |
 
-Current status: **52 passed**.
+Current status: **53 passed**.
 
 ---
 

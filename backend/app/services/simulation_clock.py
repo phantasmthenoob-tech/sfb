@@ -706,6 +706,44 @@ class SimulationEngine:
                 quotes.append(quote_payload(ticker, bar, previous.get(ticker)))
         return quotes
 
+    @staticmethod
+    def forecast_meta() -> dict:
+        """Describe the history windows behind every forecast."""
+        return {
+            "price_lookback_sessions": 20,
+            "momentum_lookback_sessions": 10,
+            "news_lookback_sessions": 5,
+            "volatility_lookback_sessions": 20,
+            "forecast_horizon_sessions": 5,
+            "max_bars_loaded": 120,
+            "note": "Uses only bars and headlines at or before the current simulation time.",
+        }
+
+    def refresh_forecasts(self) -> dict:
+        """Run all three agents now and return fresh predictions without trading."""
+        if not self.timeline:
+            return {
+                "forecasts": [],
+                "forecast_meta": self.forecast_meta(),
+                "sim_time": None,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        with self._live_lock:
+            prices = {quote["ticker"]: quote["price"] for quote in self.quotes_payload()}
+            prices = prices or self.last_prices
+            sim_time = self.timeline[self.cursor]["ts"]
+            if prices:
+                self.competition.run_forecasts(
+                    bar_index=self.cursor, sim_time=sim_time, prices=prices
+                )
+                self._publish()
+        return {
+            "forecasts": self.forecasts_payload(),
+            "forecast_meta": self.forecast_meta(),
+            "sim_time": sim_time,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     def forecasts_payload(self) -> list[dict]:
         """Each AI's top five expected moves, largest first, for the dashboard."""
         if not self.timeline:
@@ -757,6 +795,7 @@ class SimulationEngine:
             "quotes": quotes,
             "indices": indices,
             "forecasts": self.forecasts_payload(),
+            "forecast_meta": self.forecast_meta(),
             "leaderboard": leaderboard,
             "manual": manual,
             "data": self.data_payload(),

@@ -63,11 +63,22 @@ class BaseAgent(ABC):
         """Return one score per ticker, roughly in [-1, 1]."""
 
     # ------------------------------------------------------------------ loop
-    def step(self, context: MarketContext) -> list[OrderIntent]:
+    def _collect_signals(
+        self, context: MarketContext
+    ) -> tuple[list[Signal], PortfolioState]:
         state = self.repo.load_state(self.portfolio_id)
         signals = [signal for signal in self.evaluate(context, state) if signal.ticker in context.prices]
         signals.sort(key=lambda signal: signal.score, reverse=True)
         self._last_scores = {signal.ticker: signal.score for signal in signals}
+        return signals, state
+
+    def record_forecasts(self, context: MarketContext) -> None:
+        """Record a fresh top five without creating or filling any orders."""
+        signals, _state = self._collect_signals(context)
+        self._record_predictions(context, signals)
+
+    def step(self, context: MarketContext) -> list[OrderIntent]:
+        signals, state = self._collect_signals(context)
         self._record_predictions(context, signals)
         return self._signals_to_intents(signals, context, state)
 

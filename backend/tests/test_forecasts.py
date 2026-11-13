@@ -65,6 +65,22 @@ def test_agents_record_top_five_forecasts(engine):
             )
 
 
+def test_manual_refresh_records_forecasts_without_orders(engine):
+    engine.play()
+    for _ in range(21):
+        engine.tick()
+    engine.pause()
+
+    orders_before = len(engine.repo.list_orders(limit=1000))
+    result = engine.refresh_forecasts()
+
+    assert len(result["forecasts"]) == 3
+    assert result["forecast_meta"]["news_lookback_sessions"] == 5
+    assert result["forecast_meta"]["price_lookback_sessions"] == 20
+    assert all(1 <= len(group["calls"]) <= 5 for group in result["forecasts"])
+    assert len(engine.repo.list_orders(limit=1000)) == orders_before
+
+
 def test_latest_prediction_per_agent_is_used(engine):
     engine.play()
     for _ in range(21):
