@@ -56,6 +56,7 @@ class SimulationEngine:
         self.range_preset = DEFAULT_RANGE
         self.range_start = 0
         self.range_end = 0
+        self._reference_cache: tuple[int, dict[str, float]] | None = None
         self.speed = settings.default_speed
         self.status = STATUS_PAUSED
         self.mode = settings.default_mode if settings.default_mode in MODES else MODE_REPLAY
@@ -734,6 +735,7 @@ class SimulationEngine:
         return True
 
     def _reload_timeline(self) -> None:
+        self._reference_cache = None
         previous_total = self.total_bars
         self.timeline = self.repo.timeline()
         self.total_bars = len(self.timeline)
@@ -857,11 +859,16 @@ class SimulationEngine:
 
     def reference_prices(self) -> dict[str, float]:
         """Previous session's closes (the reference for a daily move)."""
+        if self._reference_cache and self._reference_cache[0] == self.cursor:
+            return dict(self._reference_cache[1])
         if self.cursor > 0:
             previous = self.repo.prices_at(self.cursor - 1)
             if previous:
-                return previous
-        return self.repo.opens_at(self.cursor)
+                self._reference_cache = (self.cursor, previous)
+                return dict(previous)
+        opening = self.repo.opens_at(self.cursor)
+        self._reference_cache = (self.cursor, opening)
+        return dict(opening)
 
     def quotes_payload(self) -> list[dict]:
         if not self.timeline:
