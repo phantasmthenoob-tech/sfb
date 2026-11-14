@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from ..ai.base_agent import BaseAgent, MarketContext, OrderIntent
 from ..ai.combined_agent import CombinedAgent
-from ..ai.features import sentiment_scores
+from ..ai.features import sentiment_scores, technical_score
 from ..ai.neural_agent import NeuralAgent
 from ..ai.news_agent import NewsAgent
 from ..ai.price_agent import PriceAgent
@@ -107,6 +107,11 @@ class CompetitionManager:
         sentiments = sentiment_scores(
             news, self.settings.stock_universe, max(0, bar_index - 5)
         )
+        technicals = {
+            ticker: technical_score(bars[ticker])
+            for ticker in self.settings.stock_universe
+            if ticker in bars
+        }
         return MarketContext(
             sim_time=sim_time,
             bar_index=bar_index,
@@ -115,6 +120,7 @@ class CompetitionManager:
             news=news,
             sentiments=sentiments,
             market_bars=market_bars,
+            technicals=technicals,
         )
 
     def run_forecasts(

@@ -105,22 +105,36 @@ def _market_trend(closes: list[float]) -> float:
     return clamp(math.tanh((fast / slow - 1.0) * 60.0), -1.0, 1.0)
 
 
-def _one_day_news(context: MarketContext, ticker: str) -> float:
-    total = weight = 0.0
-    for item in context.news:
-        if int(item.get("bar_index", -1)) != context.bar_index:
-            continue
-        if item.get("ticker") == ticker:
-            total += float(item["sentiment"])
-            weight += 1.0
-        elif item.get("ticker") is None:
-            total += float(item["sentiment"]) * 0.35
-            weight += 0.35
+def _one_day_news(
+    own: dict[str, tuple[float, float]],
+    market_total: float,
+    market_weight: float,
+    ticker: str,
+) -> float:
+    ticker_total, ticker_weight = own.get(ticker, (0.0, 0.0))
+    total = ticker_total + market_total * 0.35
+    weight = ticker_weight + market_weight * 0.35
     return clamp((total / weight if weight else 0.0) * 1.5, -1.0, 1.0)
 
 
 def build_live_features(context: MarketContext) -> dict[str, tuple[float, ...]]:
     """Return one 26-value feature vector per ticker with enough history."""
+    # Index the current bar's headlines once. Scanning all 4,000 visible news
+    # rows once per ticker made a single live score take over a second.
+    news_own: dict[str, tuple[float, float]] = {}
+    market_total = market_weight = 0.0
+    for item in context.news:
+        if int(item.get("bar_index", -1)) != context.bar_index:
+            continue
+        sentiment = float(item["sentiment"])
+        ticker = item.get("ticker")
+        if ticker is None:
+            market_total += sentiment
+            market_weight += 1.0
+        else:
+            total, weight = news_own.get(ticker, (0.0, 0.0))
+            news_own[ticker] = (total + sentiment, weight + 1.0)
+
     stock_tickers = [
         ticker
         for ticker in context.bars
@@ -165,7 +179,11 @@ def build_live_features(context: MarketContext) -> dict[str, tuple[float, ...]]:
     features: dict[str, tuple[float, ...]] = {}
     for ticker, closes in closes_by_ticker.items():
         bars = context.bars[ticker]
-        technical = technical_score(bars)
+        technical = (
+            context.technicals[ticker]
+            if ticker in context.technicals
+            else technical_score(bars)
+        )
         if technical is None:
             continue
         volumes = volumes_by_ticker[ticker]
@@ -182,7 +200,7 @@ def build_live_features(context: MarketContext) -> dict[str, tuple[float, ...]]:
         profile = PROFILE_BY_SYMBOL.get(ticker)
         sector = profile.sector if profile else None
         ret20 = _return(closes, 20)
-        news_1d = _one_day_news(context, ticker)
+        news_1d = _one_day_news(news_own, market_total, market_weight, ticker)
         features[ticker] = (
             technical["score"],
             technical["momentum"],

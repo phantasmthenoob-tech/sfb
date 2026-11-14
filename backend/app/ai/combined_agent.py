@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .base_agent import BaseAgent, MarketContext, Signal
-from .features import clamp, sentiment_score, technical_score
+from .features import clamp, sentiment_score
 from .predictions import confidence_for
 from ..trading.portfolio import PortfolioState
 
@@ -23,7 +23,7 @@ class CombinedAgent(BaseAgent):
         signals: list[Signal] = []
         min_bar = max(0, context.bar_index - self.sentiment_window_bars)
         for ticker in sorted(context.bars):
-            technical = technical_score(context.bars[ticker])
+            technical = context.technicals.get(ticker)
             if technical is None:
                 continue
             sentiment = context.sentiments.get(ticker) or sentiment_score(

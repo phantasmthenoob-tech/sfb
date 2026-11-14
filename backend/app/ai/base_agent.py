@@ -27,6 +27,7 @@ class MarketContext:
     news: list[dict]
     sentiments: dict[str, dict] = field(default_factory=dict)
     market_bars: list[dict] = field(default_factory=list)
+    technicals: dict[str, dict | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -105,30 +106,38 @@ class BaseAgent(ABC):
         """Record this agent's top five expected moves, largest first."""
         if not signals:
             return
-        ranked: list[tuple[float, float, float, Signal]] = []
+        ranked: list[tuple[float, Signal, float | None]] = []
         for signal in signals:
+            if not signal.score:
+                continue
+            technical = context.technicals.get(signal.ticker)
+            volatility = technical.get("volatility") if technical else None
+            # The expected move is proportional to |score| x volatility, so
+            # rank cheaply first and only format the five recorded calls.
+            ranked.append(
+                (abs(signal.score) * (volatility if volatility is not None else 1.0), signal, volatility)
+            )
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        if not ranked:
+            return
+
+        rows = []
+        for _strength, signal, volatility in ranked[:5]:
             bars = context.bars.get(signal.ticker, [])
-            expected = expected_move_pct(bars, signal.score)
+            expected = expected_move_pct(
+                bars, signal.score, volatility=volatility
+            )
             if expected == 0:
                 continue
             price = context.prices.get(signal.ticker) or (
                 bars[-1]["close"] if bars else 0.0
             )
-            ranked.append((abs(expected), expected, price, signal))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        if not ranked:
-            return
-
-        self.repo.replace_predictions(
-            agent_id=self.agent_id,
-            rows=[
+            rows.append(
                 {
                     "agent_id": self.agent_id,
                     "ticker": signal.ticker,
                     "horizon": "short",
-                    "direction": (
-                        "UP" if expected > 0 else "DOWN" if expected < 0 else "FLAT"
-                    ),
+                    "direction": "UP" if expected > 0 else "DOWN",
                     "confidence": round(signal.confidence, 3),
                     "expected_pct": expected,
                     "price": round(float(price), 2),
@@ -136,9 +145,9 @@ class BaseAgent(ABC):
                     "sim_time": context.sim_time,
                     "bar_index": context.bar_index,
                 }
-                for _magnitude, expected, price, signal in ranked[:5]
-            ],
-        )
+            )
+        if rows:
+            self.repo.replace_predictions(agent_id=self.agent_id, rows=rows)
 
     def _signals_to_intents(
         self, signals: list[Signal], context: MarketContext, state: PortfolioState

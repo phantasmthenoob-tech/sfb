@@ -36,6 +36,8 @@ class ModelRegistry:
         self._lock = threading.RLock()
         self._bundle: dict | None = None
         self._thread: threading.Thread | None = None
+        self._score_cache_key: tuple | None = None
+        self._score_cache_values: dict[str, float] = {}
         self._status: dict = {
             "model": MODEL_NAME,
             "state": "untrained",
@@ -265,6 +267,8 @@ class ModelRegistry:
         os.replace(temporary, self.path)
         with self._lock:
             self._bundle = bundle
+            self._score_cache_key = None
+            self._score_cache_values = {}
             self._status.update(
                 {
                     "state": "ready",
@@ -343,6 +347,18 @@ class ModelRegistry:
         # earlier replay bar. It becomes live on the next unseen decision.
         if context.bar_index <= int(bundle.get("train_end_bar", -1)):
             return {}
+        # Forecast refresh and the trading decision can ask for the same bar.
+        # Include mutable live-context fields so an updated forming bar misses.
+        cache_key = (
+            context.bar_index,
+            bundle.get("trained_at"),
+            context.sim_time,
+            len(context.news),
+            round(sum(context.prices.values()), 4),
+        )
+        with self._lock:
+            if self._score_cache_key == cache_key:
+                return dict(self._score_cache_values)
         vectors = build_live_features(context)
         if not vectors:
             return {}
@@ -353,10 +369,14 @@ class ModelRegistry:
             matrix = np.asarray([vectors[ticker] for ticker in tickers], dtype=float)
             normalized = (matrix - bundle["means"]) / bundle["scales"]
             predictions = bundle["model"].predict(normalized)
-            return {
+            scores = {
                 ticker: float(value) if np.isfinite(float(value)) else 0.0
                 for ticker, value in zip(tickers, predictions)
             }
+            with self._lock:
+                self._score_cache_key = cache_key
+                self._score_cache_values = scores
+            return dict(scores)
         except Exception:
             logger.exception("Neural model inference failed")
             return {}

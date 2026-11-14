@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .base_agent import BaseAgent, MarketContext, Signal
-from .features import clamp, sentiment_score, technical_score
+from .features import clamp, sentiment_score
 from .predictions import confidence_for
 from ..trading.portfolio import PortfolioState
 
@@ -26,7 +26,7 @@ class NewsAgent(BaseAgent):
             sentiment = context.sentiments.get(ticker) or sentiment_score(
                 context.news, ticker, min_bar
             )
-            technical = technical_score(context.bars[ticker])
+            technical = context.technicals.get(ticker)
             trend = technical["score"] if technical else 0.0
             score = clamp(sentiment["score"] * 1.5, -1.0, 1.0)
             if technical is None:

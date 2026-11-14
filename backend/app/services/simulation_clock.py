@@ -1006,16 +1006,20 @@ class SimulationEngine:
 
     # ------------------------------------------------------------- persistence
     def _take_snapshots(self, sim_time: str) -> None:
+        rows = []
         for portfolio in self.repo.list_portfolios():
             state = self.repo.load_state(portfolio["id"])
-            self.repo.insert_snapshot(
-                portfolio_id=portfolio["id"],
-                ts=sim_time,
-                bar_index=self.cursor,
-                cash=state.cash,
-                positions_value=state.positions_value(self.last_prices),
-                equity=state.equity(self.last_prices),
+            rows.append(
+                {
+                    "portfolio_id": portfolio["id"],
+                    "ts": sim_time,
+                    "bar_index": self.cursor,
+                    "cash": state.cash,
+                    "positions_value": state.positions_value(self.last_prices),
+                    "equity": state.equity(self.last_prices),
+                }
             )
+        self.repo.insert_snapshots(rows)
 
     def _persist(self) -> None:
         if not self.timeline:

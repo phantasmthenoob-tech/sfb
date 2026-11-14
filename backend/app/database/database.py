@@ -148,8 +148,10 @@ CREATE INDEX IF NOT EXISTS idx_positions_portfolio ON positions (portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_orders_portfolio ON orders (portfolio_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades (portfolio_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_news_bar ON news (bar_index);
+CREATE INDEX IF NOT EXISTS idx_news_ticker_bar ON news (ticker, bar_index DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_snapshots_portfolio ON portfolio_snapshots (portfolio_id, bar_index);
 CREATE INDEX IF NOT EXISTS idx_market_data_bar ON market_data (bar_index);
+CREATE INDEX IF NOT EXISTS idx_market_data_ticker_bar ON market_data (ticker, bar_index DESC);
 """
 
 
@@ -169,6 +171,9 @@ class Database:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode = WAL")
+        # WAL + NORMAL avoids an fsync on every dashboard tick while keeping
+        # the database consistent; a crash may lose only the newest writes.
+        self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         with self._lock:
             self._conn.executescript(SCHEMA)

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from .base_agent import BaseAgent, MarketContext, Signal
-from .features import technical_score
 from .predictions import confidence_for
 from ..trading.portfolio import PortfolioState
 
@@ -19,7 +18,7 @@ class PriceAgent(BaseAgent):
     def evaluate(self, context: MarketContext, state: PortfolioState) -> list[Signal]:
         signals: list[Signal] = []
         for ticker in sorted(context.bars):
-            technical = technical_score(context.bars[ticker])
+            technical = context.technicals.get(ticker)
             if technical is None:
                 continue
             rationale = (

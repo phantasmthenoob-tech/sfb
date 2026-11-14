@@ -61,7 +61,10 @@ def technical_score(bars: list[dict]) -> dict | None:
 
 
 def expected_move_pct(
-    bars: list[dict], score: float, horizon: int = FORECAST_HORIZON_SESSIONS
+    bars: list[dict],
+    score: float,
+    horizon: int = FORECAST_HORIZON_SESSIONS,
+    volatility: float | None = None,
 ) -> float:
     """Estimate the next ``horizon`` sessions' move from signal strength and volatility.
 
@@ -70,7 +73,8 @@ def expected_move_pct(
     noisy signal cannot advertise an absurd payoff.
     """
     closes = [bar["close"] for bar in bars]
-    volatility = realized_volatility(closes)
+    if volatility is None:
+        volatility = realized_volatility(closes)
     if volatility is None or volatility <= 0:
         return round(clamp(score * 3.0, -15.0, 15.0), 2)
     estimate = score * volatility * math.sqrt(horizon) * 100.0

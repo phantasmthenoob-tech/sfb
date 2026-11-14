@@ -12,6 +12,7 @@ from .database import Database
 class Repository:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._market_summary_cache: dict | None = None
 
     # ------------------------------------------------------------------ setup
     def seed_accounts(self, settings: Settings, now: str) -> None:
@@ -649,25 +650,32 @@ class Repository:
             )
 
     def market_summary(self) -> dict:
-        row = self.db.query_one(
-            """
-            SELECT COUNT(*) AS bar_count,
-                   COUNT(DISTINCT session_date) AS sessions,
-                   MIN(session_date) AS start_date,
-                   MAX(session_date) AS end_date,
-                   MAX(ts) AS last_recorded_at,
-                   COUNT(DISTINCT ticker) AS tickers
-            FROM market_data
-            """
-        )
-        return row or {
-            "bar_count": 0,
-            "sessions": 0,
-            "start_date": None,
-            "end_date": None,
-            "last_recorded_at": None,
-            "tickers": 0,
-        }
+        # This aggregate scans the whole market table. It is requested on every
+        # dashboard snapshot, so keep it until a market-data write invalidates it.
+        if self._market_summary_cache is None:
+            row = self.db.query_one(
+                """
+                SELECT COUNT(*) AS bar_count,
+                       COUNT(DISTINCT session_date) AS sessions,
+                       MIN(session_date) AS start_date,
+                       MAX(session_date) AS end_date,
+                       MAX(ts) AS last_recorded_at,
+                       COUNT(DISTINCT ticker) AS tickers
+                FROM market_data
+                """
+            )
+            self._market_summary_cache = dict(row) if row else {
+                "bar_count": 0,
+                "sessions": 0,
+                "start_date": None,
+                "end_date": None,
+                "last_recorded_at": None,
+                "tickers": 0,
+            }
+        return dict(self._market_summary_cache)
+
+    def _invalidate_market_summary(self) -> None:
+        self._market_summary_cache = None
 
     def plan_new_sessions(self, session_dates: Iterable[str]) -> list[tuple[str, int]]:
         """Map new session dates onto the next available bar indices."""
@@ -719,6 +727,7 @@ class Repository:
                     """,
                     news_rows,
                 )
+        self._invalidate_market_summary()
         return len(sessions)
 
     def upsert_bars(self, bars: Iterable[dict]) -> None:
@@ -743,6 +752,7 @@ class Repository:
                 """,
                 rows,
             )
+        self._invalidate_market_summary()
 
     def delete_session(self, session_date: str) -> int:
         """Remove one session's bars and headlines (used when leaving live mode)."""
@@ -757,6 +767,7 @@ class Repository:
             conn.execute("DELETE FROM market_data WHERE session_date = ?", (session_date,))
             for index in indices:
                 conn.execute("DELETE FROM news WHERE bar_index = ?", (index,))
+        self._invalidate_market_summary()
         return len(indices)
 
     def replace_market_data(self, bars: list[dict], news: list[dict]) -> int:
@@ -782,6 +793,7 @@ class Repository:
                     """,
                     news_rows,
                 )
+        self._invalidate_market_summary()
         return len({bar["session_date"] for bar in bar_rows})
 
     def timeline(self) -> list[dict]:
@@ -880,13 +892,42 @@ class Repository:
     def insert_snapshot(
         self, portfolio_id: int, ts: str, bar_index: int, cash: float, positions_value: float, equity: float
     ) -> None:
+        self.insert_snapshots(
+            [
+                {
+                    "portfolio_id": portfolio_id,
+                    "ts": ts,
+                    "bar_index": bar_index,
+                    "cash": cash,
+                    "positions_value": positions_value,
+                    "equity": equity,
+                }
+            ]
+        )
+
+    def insert_snapshots(self, rows: Iterable[dict]) -> None:
+        """Write all portfolio equity marks in one transaction per bar."""
+        values = [
+            (
+                row["portfolio_id"],
+                row["ts"],
+                row["bar_index"],
+                round_money(row["cash"]),
+                round_money(row["positions_value"]),
+                round_money(row["equity"]),
+            )
+            for row in rows
+        ]
+        if not values:
+            return
         with self.db.transaction() as conn:
-            conn.execute(
+            conn.executemany(
                 """
-                INSERT INTO portfolio_snapshots (portfolio_id, ts, bar_index, cash, positions_value, equity)
+                INSERT INTO portfolio_snapshots
+                    (portfolio_id, ts, bar_index, cash, positions_value, equity)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (portfolio_id, ts, bar_index, round_money(cash), round_money(positions_value), round_money(equity)),
+                values,
             )
 
     def snapshots(self, portfolio_id: int, limit: int = 400) -> list[dict]:
