@@ -91,7 +91,7 @@ def test_matured_forecasts_are_settled_and_scored(engine):
     assert scorecard["horizon_sessions"] == 5
     assert scorecard["settled_calls"] > 0
     assert scorecard["open_calls"] > 0
-    assert len(scorecard["agents"]) == 3
+    assert len(scorecard["agents"]) == 4
     for agent in scorecard["agents"]:
         if agent["settled_calls"]:
             assert 0 <= agent["hit_rate_pct"] <= 100

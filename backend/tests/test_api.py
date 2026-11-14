@@ -29,12 +29,12 @@ def test_health_and_simulation_status(client):
     assert status["status"] in {"paused", "running"}
 
 
-def test_leaderboard_starts_with_four_equal_accounts(client):
+def test_leaderboard_starts_with_five_equal_accounts(client):
     response = client.get("/api/leaderboard")
     assert response.status_code == 200
     entries = response.json()["entries"]
-    assert len(entries) == 4
-    assert [entry["rank"] for entry in entries] == [1, 2, 3, 4]
+    assert len(entries) == 5
+    assert [entry["rank"] for entry in entries] == [1, 2, 3, 4, 5]
     assert all(entry["starting_balance"] == 10000.0 for entry in entries)
     assert all(entry["equity"] == 10000.0 for entry in entries)
     kinds = {entry["kind"] for entry in entries}
@@ -70,7 +70,7 @@ def test_market_endpoints_payloads(client):
     assert scorecard.status_code == 200
     scorecard_body = scorecard.json()
     assert scorecard_body["horizon_sessions"] == 5
-    assert len(scorecard_body["agents"]) == 3
+    assert len(scorecard_body["agents"]) == 4
 
     quote = client.get("/api/market/quote/AAPL").json()
     assert quote["price"] > 0
@@ -94,12 +94,26 @@ def test_market_endpoints_payloads(client):
     assert client.get("/api/market/quote/NOPE").status_code == 404
 
 
-def test_agents_endpoint_exposes_three_independent_portfolios(client):
+def test_model_status_endpoint_exposes_neural_runtime(client):
+    response = client.get("/api/models/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model"] == "neural"
+    assert body["features"] == 26
+    assert body["state"] in {"untrained", "ready", "training", "error"}
+
+
+def test_agents_endpoint_exposes_four_independent_portfolios(client):
     agents = client.get("/api/agents").json()["agents"]
-    assert len(agents) == 3
-    assert {agent["model_type"] for agent in agents} == {"price", "news", "combined"}
+    assert len(agents) == 4
+    assert {agent["model_type"] for agent in agents} == {
+        "price",
+        "news",
+        "combined",
+        "neural",
+    }
     portfolio_ids = {agent["portfolio"]["id"] for agent in agents}
-    assert len(portfolio_ids) == 3
+    assert len(portfolio_ids) == 4
     for agent in agents:
         assert agent["portfolio"]["starting_balance"] == 10000.0
 
@@ -191,8 +205,8 @@ def test_simulation_reset_restores_accounts(client):
 def test_websocket_sends_snapshot(client):
     with client.websocket_connect("/ws/market") as websocket:
         payload = websocket.receive_json()
-    assert payload["type"] == "snapshot"
-    assert len(payload["leaderboard"]) == 4
+        assert payload["type"] == "snapshot"
+        assert len(payload["leaderboard"]) == 5
     assert payload["simulation"]["total_bars"] == 60
     assert payload["manual"]["id"] > 0
 

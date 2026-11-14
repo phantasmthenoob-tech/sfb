@@ -1,849 +1,169 @@
-# AI Market Simulator — Complete Feature and Function Reference
+# AI Market Simulator
 
-A paper-trading competition between three independent AI portfolios and one
-manual portfolio. Each account starts with **$10,000**. The simulator either
-replays five years of real daily Yahoo Finance bars or follows live Yahoo
-Finance quotes during the US session.
+**Project type:** software engineering / algorithmic trading simulation  
+**Status:** research prototype; historical replay and offline evaluation are complete, live deployment of the latest commit is not yet verified.
 
-Everything is simulated: no real money, no brokerage connection, and no real
-news feed. Headlines are generated locally. Market prices are real Yahoo
-Finance data (or deterministic sample data when Yahoo is unavailable).
+AI Market Simulator is a paper-trading platform for developing, simulating and comparing multiple algorithmic trading strategies against historical and live market data. Four independent agents manage portfolios in a shared market environment with the same starting capital and trading constraints. A fifth, manual portfolio lets a person place orders through the same execution engine. Every account is marked to market, ranked, and recorded so that decisions can be inspected rather than judged only by a final return number.
 
-> This is a demo, not investment advice. The manual order endpoint is
-> unauthenticated, so do not expose a deployment as a real trading service.
+The project is an engineering investigation into how trading strategies are evaluated. The central problem is not generating signals; it is preventing a plausible-looking backtest from being mistaken for evidence. It is **not** an investment platform, a brokerage connection or a claim that any strategy has predictive value. All orders are simulated. Historical headlines are generated locally. Market prices come from Yahoo Finance.
 
-For a fictionalized, day-by-day account of the design, build and debugging
-process, see the [build journal](docs/BUILD_JOURNAL.md).
+The current implementation covers:
 
----
+- 120 US-listed stocks across 13 industry sectors.
+- 8 ETF benchmarks, kept out of the agent competition.
+- Five years of daily replay data by default, with selectable replay windows from one week to the full history.
+- Three deterministic heuristic strategies: Price AI, News AI and Combined AI.
+- A live **Neural AI** agent that ranks the universe with a trained neural network.
+- A manual portfolio with long, short, sell and cover orders.
+- Active model training from recorded bars and headlines, with status polling and a Models tab.
+- A separate offline experiment comparing the three heuristics with Random Forest, Gradient Boosting and a neural-network baseline.
+- Walk-forward validation, transaction costs, drawdown, Sharpe ratio, volatility, regime and turnover reporting.
+- Sector attribution and return-correlation diagnostics.
 
-## Table of contents
-
-1. [What is in the project](#1-what-is-in-the-project)
-2. [Quick start](#2-quick-start)
-3. [The screen, control by control](#3-the-screen-control-by-control)
-   - [Header and clock](#31-header-and-clock)
-   - [Tabs](#32-tabs)
-   - [Forecasts](#33-forecasts-tab)
-   - [Leaderboard](#34-leaderboard-tab)
-   - [Markets](#35-markets-tab)
-   - [Trading](#36-trading-tab)
-   - [Activity](#37-activity-tab)
-   - [Loading, errors and reconnects](#38-loading-errors-and-reconnects)
-4. [Replay and live modes](#4-replay-and-live-modes)
-5. [AI agents and forecasts](#5-ai-agents-and-forecasts)
-6. [The trading engine](#6-the-trading-engine)
-7. [Market data and news](#7-market-data-and-news)
-8. [Backend architecture and function reference](#8-backend-architecture-and-function-reference)
-9. [API reference](#9-api-reference)
-10. [WebSocket reference](#10-websocket-reference)
-11. [Database reference](#11-database-reference)
-12. [Frontend architecture and function reference](#12-frontend-architecture-and-function-reference)
-13. [Configuration](#13-configuration)
-14. [Deployment](#14-deployment)
-15. [Tests](#15-tests)
-16. [Troubleshooting](#16-troubleshooting)
-17. [Deliberate limitations](#17-deliberate-limitations)
-18. [Glossary](#18-glossary)
+The live competition includes both transparent heuristics and Neural AI. The offline experiment remains a separate walk-forward study; the live model is trained from the simulator's own recorded history and only scores bars after its training cutoff.
 
 ---
 
-## 1. What is in the project
+## 1. Objectives
 
-- **Three AI accounts**
-  - **Price AI** — technical trend and momentum.
-  - **News AI** — simulated headline sentiment.
-  - **Combined AI** — price trend with a 10% news-sentiment tie-breaker.
-- **One manual account** — you trade it with Buy, Sell, Short and Cover.
-- **Replay mode** — walks cached daily bars from Yahoo Finance. One bar is one
-  completed trading day. Default history is five years (about 1,255 sessions).
-- **Live mode** — polls real quotes every 60 seconds during the US session,
-  keeps one forming daily bar per session, and lets agents re-evaluate every
-  five minutes.
-- **Forecasts** — each AI records its **top five** expected moves for the
-  current decision, including expected percent, share price and expected
-  dollar move per share.
-- **Leaderboard** — ranks all four accounts by total return with max drawdown
-  and trade counts.
-- **Markets** — selectable ticker list, daily line chart, OHLC, volume and
-  SMA 5 / SMA 20.
-- **Trading** — manual order ticket, positions, recent orders and account
-  summary.
-- **Activity** — global fills and order history.
-- **REST API + WebSocket** — all dashboard data is available programmatically.
-- **SQLite persistence** — market cache, accounts, orders, fills, predictions
-  and equity snapshots.
+### Primary objectives
 
-### Project layout
+1. Build a functional paper-trading environment with a deterministic clock, order lifecycle and portfolio accounting.
+2. Implement several independent strategies that receive the same market information and operate under the same constraints.
+3. Compare strategies on identical historical periods, transaction costs and execution assumptions.
+4. Evaluate results with return, risk, drawdown, turnover and benchmark-relative measures rather than return alone.
 
-```text
-.
-├── backend/
-│   ├── app/
-│   │   ├── ai/            strategies, signals and forecast estimates
-│   │   ├── api/           FastAPI route modules
-│   │   ├── competition/   agent runner, rankings and metrics
-│   │   ├── database/      SQLite schema and repositories
-│   │   ├── market/        Yahoo daily/live data, news, data helpers
-│   │   ├── services/      replay/live clock and pub/sub
-│   │   ├── trading/       order manager, exchange, accounting, risk
-│   │   ├── config.py      runtime settings and defaults
-│   │   └── main.py        FastAPI app, CORS, health and WebSocket
-│   ├── tests/             accounting, replay, API, data and forecast tests
-│   ├── requirements.txt
-│   └── requirements-dev.txt
-├── frontend/
-│   ├── src/
-│   │   ├── api/           REST client and WebSocket URL
-│   │   ├── components/    every visible panel and table
-│   │   ├── hooks/         WebSocket/polling stream
-│   │   ├── lib/           number and date formatting
-│   │   ├── App.tsx        header, tabs and page switching
-│   │   └── types.ts       shared frontend types
-│   ├── public/
-│   └── package.json
-├── render.yaml            optional Render blueprint
-└── README.md
+### Secondary objectives
+
+- Introduce machine-learning baselines and compare them with simple heuristics.
+- Validate models chronologically with walk-forward training and label purging.
+- Expose sector-level attribution and cross-sectional correlation so a large universe is not mistaken for many independent opportunities.
+- Investigate whether combining price and sentiment signals improves results.
+
+### Future objectives
+
+- Reduce survivorship bias with point-in-time historical constituents and delisted securities.
+- Replace simulated headlines with an archived historical news source.
+- Export full daily equity curves and extend the evaluation across more market regimes.
+- Add more rigorous risk models, portfolio construction and statistical uncertainty estimates.
+
+---
+
+## 2. System architecture
+
+The implementation is a single-process FastAPI backend with a React/Vite frontend. The backend owns the clock, the market data, the agents, the order book and SQLite. The frontend is a read-mostly client; it submits manual orders and control actions through REST and receives complete snapshots over a WebSocket.
+
+```mermaid
+flowchart LR
+    Y[Yahoo Finance] --> P[Daily and live market-data provider]
+    N[Simulated headline generator] --> DB[(SQLite)]
+    P --> DB
+    DB --> C[Simulation clock]
+    C --> M[Competition manager]
+    M --> A[Price / News / Combined / Neural agents]
+    U[Manual portfolio] --> O[Order manager]
+    A --> O
+    O --> X[Exchange and risk checks]
+    X --> DB
+    C --> S[Snapshot builder]
+    DB --> R[Sector and correlation read models]
+    R --> API[FastAPI REST + /ws/market]
+    S --> API
+    API --> F[React dashboard]
+    E[Offline six-model experiment] -.->|research only, not live| DB
 ```
 
----
+### Stack
 
-## 2. Quick start
+| Component | Technology |
+| --- | --- |
+| Backend | Python 3.12 |
+| API | FastAPI |
+| Database | SQLite with WAL |
+| Frontend | React 18 + TypeScript |
+| Build | Vite |
+| Market data | Yahoo Finance public chart endpoint |
+| Communication | REST + full-snapshot WebSocket |
+| Hosting blueprint | Render web service + static site |
 
-### Backend
+### How a replay bar moves through the system
 
-```bash
-cd backend
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --port 8000
-```
+1. **Ingestion.** The backend loads aligned daily OHLCV bars from Yahoo Finance, or generates deterministic sample bars when Yahoo is unavailable. Bars are stored in SQLite with a shared session calendar and `bar_index`.
+2. **Gating.** `SimulationClock` keeps a cursor. Repository reads for a decision are limited to bars and news at or before that cursor. The agent context loads at most the last 120 bars per stock and a rolling news window.
+3. **Decision.** At the current close, the competition manager asks each agent for order intents and forecast calls. The agent sees only the gated context.
+4. **Execution.** Intents become pending orders. They fill at the **next bar's open**, not at the close that produced the signal. Fill price, fees and eligible quantities are recorded.
+5. **Accounting.** Cash, signed positions, average entry, realized P&L, borrow fees and portfolio snapshots are updated. Equity is `cash + Σ(quantity × last close)` with signed quantities, so shorts reduce equity rather than appearing as assets.
+6. **Presentation.** The clock publishes a complete snapshot containing quotes, indices, forecasts, leaderboard, manual portfolio, universe metadata and data-source state.
+7. **Transport.** The WebSocket pushes snapshots. If the socket is unavailable, the frontend polls REST every three seconds. Manual orders are queued through the same order manager as agent orders.
 
-- REST API: `http://localhost:8000`
-- Interactive Swagger docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/api/health`
-- WebSocket: `ws://localhost:8000/ws/market`
+### Main code boundaries
 
-The first start downloads daily Yahoo Finance bars and stores them in SQLite.
-If Yahoo cannot be reached, the backend falls back to deterministic synthetic
-sample prices. With `SIM_AUTOSTART=0` the replay boots paused; press **Start**.
+| Area | Main files |
+| --- | --- |
+| Clock, replay/live lifecycle, snapshots | `backend/app/services/simulation_clock.py` |
+| Replay date windows | `backend/app/services/replay_ranges.py` |
+| Agent orchestration and context | `backend/app/competition/manager.py` |
+| Strategies | `backend/app/ai/price_agent.py`, `news_agent.py`, `combined_agent.py` |
+| Feature calculations | `backend/app/ai/features.py` |
+| Order validation and fills | `backend/app/trading/order_manager.py`, `exchange.py`, `risk_limits.py` |
+| SQLite schema and queries | `backend/app/database/database.py`, `repositories.py` |
+| Market data | `backend/app/market/data_provider.py`, `yahoo_provider.py`, `live_provider.py` |
+| Universe and metadata | `backend/app/market/universe.py` |
+| Sector and correlation analysis | `backend/app/competition/sectors.py`, `correlations.py` |
+| Frontend state and screens | `frontend/src/hooks/useMarketStream.ts`, `frontend/src/components/` |
+| Offline experiment | `backend/tools/experiment.py` |
 
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Vite serves `http://localhost:3000` and proxies `/api` and `/ws` to port 8000.
-Open the page and use the tabs. The default tab is **Leaderboard**.
-
-For a separate backend:
-
-```bash
-VITE_API_BASE=https://your-api.onrender.com \
-VITE_WS_URL=wss://your-api.onrender.com/ws/market \
-npm run build
-```
-
-Both values are baked into the bundle at build time. Rebuild after changing
-them.
-
-### Tests
-
-```bash
-cd backend
-. .venv/bin/activate
-python -m pytest -q
-```
-
-At the time of writing this is **52 passing tests**.
+Detailed function-level documentation, installation steps and the full interface reference are in [TECHNICAL.md](TECHNICAL.md).
 
 ---
 
-## 3. The screen, control by control
+## 3. Market data and ticker universe
 
-### 3.1 Header and clock
-
-The header is always visible above the tabs.
-
-| Element | What it does |
+| Property | Current configuration |
 | --- | --- |
-| **Market Simulator / AI paper trading** | Brand label. It is not a link. |
-| **Clock date** | The simulation date: the current replay session, or the latest live session date. Format: `Feb 19, 2026`. |
-| **Clock status** | `Running`, `Paused`, `Complete`, `Live · market open`, or `Live · market closed`. |
-| **Replay button** | Switches to replay mode. Disabled while an action is in flight. Switching modes resets all four portfolios and their histories. |
-| **Live button** | Switches to live mode and immediately performs an initial quote poll. Disabled while busy. Also resets all portfolios. |
-| **Range** | Replay window: `1W`, `1M`, `3M`, `YTD`, `1Y`, `5Y` or `All`. Changing it resets trading and starts at the selected window's first recorded session. Hidden in live mode. |
-| **1× / 5× / 10× / 30×** | Replay speed. Hidden in live mode. Each speed is one replay bar (one trading day) per `1 / speed` seconds, so 1× = one day per second and 30× = thirty days per second. |
-| **Start** | Starts or resumes a paused replay. Disabled while busy. If the replay is complete, the button label is **Restart**; pressing it resets the replay and starts from the selected range's first session. |
-| **Pause** | Pauses a running replay. Hidden in live mode. |
-| **Reset** | Resets the current mode: all accounts go back to $10,000, and orders, trades, predictions and equity snapshots are deleted. In replay it goes to the first bar and pauses; in live it goes to the latest bar and continues running. |
-| **Progress bar** | Thin line under the header showing replay progress. Hidden in live mode. It is decorative and not interactive. |
+| Symbols | **128 total**: 120 stocks + 8 ETFs |
+| Historical period | **5 years** by default; 10 years available for offline experiments |
+| Daily bars | **160,640** for the 5-year, 128-symbol dataset |
+| Sessions | **1,255** in the 5-year replay |
+| Frequency | Daily bars; live quotes polled every 60 seconds during the US session |
+| Primary price source | Yahoo Finance chart endpoint |
+| Historical news | Deterministic locally generated headlines |
+| ETFs | SPY, QQQ, IWM, DIA, EFA, EEM, GLD, TLT |
+| Agent tradable set | Stocks only |
 
-Header controls are disabled while an action request is running. The buttons do
-not open dialogs; Reset acts immediately.
+Available information includes daily OHLCV, live last price and day change, synthetic index levels, simulated headlines, sector/exposure metadata, forecasts and portfolio analytics.
 
-### 3.2 Tabs
+### Two classification systems
 
-Tabs switch client-side panels without changing the URL. The leftmost tab is
-**Forecasts**; the default selected tab is **Leaderboard**.
+The universe deliberately separates **what a company does** from **what affects it**.
 
-| Tab | Contents |
-| --- | --- |
-| **Forecasts** | The largest expected move across all AIs, plus each AI's ranked top five. |
-| **Leaderboard** | Ranked accounts, quote list and your account summary. |
-| **Markets** | Ticker selector, price chart, OHLC/volume and moving averages. |
-| **Trading** | Manual order ticket, account values, positions and recent orders. |
-| **Activity** | Latest fills and latest orders across all accounts. |
+**Industry sectors** are mutually exclusive:
 
-Tabs are buttons, not links. There are no per-tab URLs, browser-history entries
-or deep links.
+Technology; Banking and finance; Healthcare and pharmaceuticals; Food and agriculture; Retail and consumer goods; Energy and oil; Defense and aerospace; Transportation and logistics; Manufacturing; Telecommunications; Real estate; Utilities; Materials and mining.
 
-### 3.3 Forecasts tab
+There is no “Political” sector.
 
-The Forecasts tab answers: **“What does each AI think its five biggest wins
-are right now?”**
+**Exposure tags** are additive and non-exclusive:
 
-#### Biggest expected win hero
+Government policy; Defense spending; Trade policy; Geopolitical risk; Interest rates; Energy policy; AI adoption; China exposure.
 
-At the top, the panel titled **Biggest expected win** shows the single forecast
-with the largest absolute expected percentage across every AI.
+A technology company can therefore carry AI adoption, China exposure and government-policy tags without being placed in a separate political category. ETFs are benchmarks: they are displayed and available for charting/manual use, but agents do not trade them or appear against them in the strategy leaderboard.
 
-- Large arrow: `↑` for UP, `↓` for DOWN, `→` for FLAT.
-- Expected percentage, with two decimals.
-- Ticker and an agent tag.
-- A sentence such as “Price AI expects a rise of about 6.84% over the next five
-  sessions, a move of +$47.31 per share.”
-- For a DOWN call it adds: “A short would target that move.”
-- Confidence as a percentage.
-- The agent's rationale (for example `SMA5 704.33 vs SMA20 656.43; 10-bar
-  momentum +14.50%`).
-- The date of the call.
+### Missing data and corporate actions
 
-The hero does not contain buttons.
+- All symbols are aligned to one shared trading calendar.
+- A missing session is forward-filled from the previous close with volume 0.
+- A dataset is rejected if it has fewer than 60 sessions or if a ticker is missing more than half the calendar.
+- The application reads Yahoo's daily close series; it does **not** apply its own split or dividend adjustment. Returns are therefore price returns, not total returns with reinvested dividends. Corporate-action treatment depends on what Yahoo returns.
+- During the US session, an unfinished daily bar is discarded until the session is complete.
 
-#### Per-AI panels
+### Survivorship bias
 
-Below the hero are three panels, one per AI. Each is ordered by absolute
-expected percentage, largest first, and shows up to five calls.
+The 120 stocks are **current-listed survivors**. The repository does not contain point-in-time historical constituents or delisted/acquired companies. That means historical performance can look better than a strategy that had to choose from the universe as it actually existed at the time. This is a documented limitation, not something the current tests solve.
 
-Each row contains:
+### Replay windows
 
-| Column/line | Meaning |
-| --- | --- |
-| Rank | `1` to `5`, largest absolute expected move first. |
-| Ticker | The stock symbol. |
-| Rise/drop/flat | Direction label derived from the sign of the expected move. |
-| Expected percentage | Signed estimate, e.g. `+6.84%` or `-4.98%`. Green for positive, red for negative. |
-| Price per share | The price used for the estimate: the current replay or live price. |
-| Estimated dollar move | `price × expected_pct / 100`, signed, labelled `est.`. This is the expected change in the value of one share, not a position-sized P&L. |
-
-If an agent has fewer than five non-zero estimates, it shows fewer rows. If no
-agent has recorded a call yet, the tab shows:
-
-> No calls yet. Start the replay and the AIs will rank their five biggest
-> expected moves before each trading day's orders.
-
-Forecasts are recorded before the agent's order intents are submitted. In
-replay, the whole batch is replaced once per bar. In live mode, it is replaced
-on each agent decision while the market is open. A down call is a candidate
-short, not a guaranteed win. The percentage and dollar figures are model
-estimates based on signal strength and recent volatility.
-
-### 3.4 Leaderboard tab
-
-The Leaderboard panel ranks every account by total return.
-
-| Column | Meaning |
-| --- | --- |
-| `#` | Rank. Ties are broken by lower maximum drawdown. |
-| Account | Agent name, or **You** with a `manual` tag. |
-| Equity | Cash plus the mark-to-market value of all positions. |
-| Return | Total return percentage from the $10,000 starting balance. |
-| Max DD | Maximum peak-to-trough equity drawdown, shown as a negative percentage. |
-| Trades | Total filled trades. |
-
-No column is clickable and the table cannot be sorted by the user. The ranking
-always comes from the backend.
-
-The right column contains:
-
-- **Markets** — a six-stock snapshot with latest price and daily change. The
-  full universe, sector filters and ETF benchmarks are in the Markets tab.
-  These rows are plain text, not buttons.
-- **Your account** — manual account equity, cash and number of open positions.
-
-The Overview/Leaderboard tab does not show win rate, fees, borrow costs or
-individual positions; those values are available through the API.
-
-### 3.5 Markets tab
-
-#### Ticker list
-
-The left panel lists the 120 stocks by default, with a **Stocks / ETFs** toggle
-and a sector filter. Each row is a **button**:
-
-- Ticker symbol.
-- Latest price.
-- Daily change percentage.
-
-Clicking a row selects that ticker. The selected row is highlighted. ETFs are
-kept in their own view and are never added to an agent's tradable universe.
-
-#### Quote header
-
-For the selected ticker:
-
-- Ticker and latest price.
-- Change percentage.
-- A caption with the quote date and `close`, `live`, or `last close` depending
-  on mode and market state.
-
-#### Price chart
-
-The chart is a responsive SVG line chart of closing prices, not candlesticks.
-
-- Up to 240 bars are requested from `/api/market/history/{ticker}?limit=240`.
-- The line is green when the last close is at or above the first close, red
-  otherwise.
-- A translucent area fill follows the line.
-- Four horizontal grid lines are labelled with prices on the right.
-- The last price has a dashed horizontal marker and a dot.
-- The first and last dates are printed under the chart.
-- The chart has no zoom, pan, crosshair or tooltip; the replay date window is selected in the header.
-- With fewer than two bars it shows “Collecting daily bars…”.
-
-The chart refreshes when the selected ticker changes, every two replay bars,
-and on each live poll timestamp.
-
-#### Quote statistics
-
-| Stat | Source |
-| --- | --- |
-| Open | Current bar open. |
-| High | Current bar high. |
-| Low | Current bar low. |
-| Volume | Current bar volume, with thousands separators. |
-| SMA 5 | Average of the last five closes, or `—`. |
-| SMA 20 | Average of the last twenty closes, or `—`. |
-
-Below the stats is a data note describing the data source and, in replay, the
-last bar date. In live mode the note describes Yahoo polling and simulated
-headlines.
-
-### 3.6 Trading tab
-
-#### Trade ticket
-
-- **Ticker** — a dropdown of all configured stocks and ETFs.
-- **Shares** — a number input. Minimum 1, integer step. Default is 5.
-- **Buy** — opens or adds to a long position.
-- **Sell** — reduces an existing long. It cannot open a short.
-- **Short** — opens or adds to a short position.
-- **Cover** — reduces an existing short. It cannot open a long.
-
-All four order buttons are disabled while an order is being submitted and when
-the replay is complete. The button that is submitting changes its label to `…`.
-
-The helper text under the fields shows the selected price (`live` or
-`last close`) and the fill expectation:
-
-- Replay: “fills at the next day's open”.
-- Live and market open: “fills on the next quote”.
-- Live and market closed: “queued until the market opens”.
-
-After submission a notice shows the server message. The app refreshes the
-snapshot immediately and again after 700 ms. A negative or non-numeric share
-count shows “Enter a positive number of shares.”
-
-When the replay is complete, the ticket is disabled and says “Replay finished.
-Reset to trade again.”
-
-#### Account panel
-
-Shows the manual account's equity, cash, positions value and total return.
-Values are read-only.
-
-#### Positions table
-
-| Column | Meaning |
-| --- | --- |
-| Ticker | Stock symbol. |
-| Shares | Signed quantity: `+` long, `-` short. |
-| Avg | Average entry price. |
-| Last | Current mark price. |
-| P&L | Unrealized profit/loss in dollars, green or red. |
-
-It shows “No open positions.” when empty. This table has no close button; use
-the Sell or Cover buttons in the ticket.
-
-#### Recent orders table
-
-Shows the six most recent manual orders:
-
-- Time, side, ticker, shares, status and fill price.
-- Status is `PENDING`, `FILLED`, `REJECTED` or `CANCELLED`.
-- Rejected orders show a shortened rejection reason.
-- Fill is `—` until the order fills.
-
-#### What each order means
-
-| Side | Opens/closes | Cash effect | Constraint |
-| --- | --- | --- | --- |
-| BUY | Opens or adds long | Cash decreases by notional + fee | No existing short in that ticker |
-| SELL | Reduces long | Cash increases by notional − fee | Cannot exceed the long quantity |
-| SHORT | Opens or adds short | Cash increases by notional − fee | No existing long in that ticker |
-| COVER | Reduces short | Cash decreases by notional + fee | Cannot exceed the short quantity |
-
-Orders are **market orders**. They are queued as `PENDING` and filled by the
-simulation loop at the next eligible price. A queued order is validated again
-at fill time; it can be rejected if cash, position limits or prices have
-changed.
-
-### 3.7 Activity tab
-
-The Activity tab has two panels.
-
-#### Fills
-
-The twelve most recent actual fills across every portfolio:
-
-- Time, account, side, ticker, shares, price and realized P&L.
-- Realized P&L is `—` for opening trades and a signed dollar value for closing
-  trades.
-
-#### Orders
-
-The twelve most recent orders across every portfolio:
-
-- Time, account, side, ticker, shares, status and fill price.
-- Rejected orders show the reason prefix.
-
-The Activity tab refreshes when the replay bar changes (checked in two-bar
-buckets). It does not have filters, pagination, export or a manual refresh
-button.
-
-### 3.8 Loading, errors and reconnects
-
-- Before the first snapshot arrives, the page shows **Connecting…**.
-- If the backend cannot be reached and there is no snapshot yet, a red error
-  says “Cannot reach the backend.” with the HTTP/network error.
-- A failed header/order action shows the server's error message in a red banner
-  above the active tab.
-- The frontend connects to `/ws/market`. If the socket closes, it retries every
-  2.5 seconds.
-- While the socket is unavailable, the app polls the REST endpoints every three
-  seconds.
-- Malformed WebSocket frames are ignored so a bad frame does not tear down the
-  stream.
-- Tab switches are instant; there is no page reload.
-
----
-
-## 4. Replay and live modes
-
-### Replay mode
-
-- Uses completed daily OHLCV bars only. The partial current day is excluded.
-- One bar equals one trading day. The default Yahoo range is five years
-  (usually 1,255 bars), so a fresh database takes longer to download once.
-- The clock starts at bar 0. With `SIM_AUTOSTART=1` it runs immediately;
-  otherwise it starts paused.
-- Every tick:
-  1. Fills pending orders at the next bar's **open**.
-  2. Advances the cursor and marks positions at the new closes.
-  3. Accrues short borrow fees when the session date changes.
-  4. Runs agent decisions when the bar index matches the decision cadence
-     (every bar in the default configuration).
-  5. Records equity snapshots and broadcasts a new snapshot.
-- At the final bar, pending orders are cancelled with `replay_finished`, the
-  status becomes `COMPLETED`, and no further decisions are made.
-- **Start** resumes; **Pause** stops advancing; **Restart** after completion
-  resets and starts again.
-- Changing speed affects how quickly bars advance; it does not change fills or
-  decisions.
-
-### Live mode
-
-- The backend polls Yahoo Finance every `LIVE_POLL_SECONDS` (60 by default)
-  while the simulation is running.
-- During the regular US session it maintains one forming daily bar for today:
-  open, high, low, latest price and cumulative volume.
-- Pending orders fill at the latest quote on the next poll.
-- Agents re-evaluate every `LIVE_DECISION_SECONDS` (300 by default) and when a
-  new live session is first created.
-- The header shows **Live · market open** or **Live · market closed**. Outside
-  the regular session, weekends and holidays, prices are the last known prints
-  and no session bar is created or filled.
-- The Start/Pause and speed controls are hidden in live mode; the simulation is
-  running while the mode is active. **Reset** resets accounts and clears
-  history, then continues running.
-- In live mode the data note explains the poll interval and that headlines are
-  simulated.
-- A live poll failure is recorded in the live state and shown through the API;
-  the UI keeps the last known prices.
-
-### Switching modes
-
-Switching from replay to live (or back):
-
-1. Cancels every pending order with `mode_switch`.
-2. Resets all four accounts to $10,000 and deletes positions, trades, orders,
-   predictions and equity snapshots.
-3. Switches the clock.
-4. On the way back to replay, deletes a still-forming live session so it cannot
-   leak into history.
-5. Replay: cursor goes to bar 0 and pauses. Live: cursor goes to the latest bar
-   and runs, then performs an initial quote poll.
-
-Mode switches are deliberately destructive: results from replay and live are
-not mixed.
-
-### Speeds
-
-| Speed | One trading day per |
-| --- | --- |
-| 1× | 1 second |
-| 5× | 0.2 seconds |
-| 10× | 0.1 seconds |
-| 30× | about 0.033 seconds |
-
-The speed options come from the backend and are fixed at `(1, 5, 10, 30)`.
-
----
-
-## 5. AI agents and forecasts
-
-### The shared agent lifecycle
-
-All agents extend `BaseAgent` and follow the same rules:
-
-1. Receive a read-only `MarketContext` containing the visible prices, bars, news
-   and current bar index.
-2. `evaluate()` returns one `Signal` per ticker with a score roughly in
-   `[-1, 1]`, a confidence and a human-readable rationale.
-3. Signals are filtered to tickers with a current price and sorted by score
-   descending.
-4. The agent records its **top five** expected moves.
-5. The agent converts signals into `OrderIntent`s using fixed entry/exit
-   thresholds and position sizing.
-6. The order manager, not the agent, validates and queues every intent.
-
-Agents never change cash, positions or order status directly.
-
-### Signal scoring
-
-The shared technical score uses:
-
-- `SMA5` and `SMA20` of closing prices.
-- 10-bar percentage momentum.
-- `trend = tanh((SMA5 / SMA20 - 1) × 120)`.
-- `momentum_component = tanh(10-bar return × 25)`.
-- `score = 0.6 × trend + 0.4 × momentum_component`, clamped to `[-1, 1]`.
-
-It needs at least 20 closes (and 11 for momentum). When there is not enough
-history it returns no signal.
-
-### History windows
-
-The models never see the future. Each one reads a fixed window ending at the
-current replay or live bar:
-
-| Input | Lookback |
-| --- | --- |
-| Price trend | 5-session and 20-session moving averages |
-| Price momentum | 10 sessions |
-| News sentiment | Last 5 sessions |
-| Realized volatility | Last 20 sessions |
-| Forecast horizon | Next 5 sessions |
-| Bars loaded into the context | Up to 120 |
-
-The context loads more bars than the models use so the history endpoint and
-debugging have room; the scoring windows above are the actual limits. The
-Forecasts tab shows these lookbacks above the calls, and
-`overview.forecast_meta` exposes the same values to API clients.
-
-### The three strategies
-
-| Agent | Signal | Entry threshold | Exit threshold | Max entries | Long target | Short target |
-| --- | --- | --- | --- | --- | --- | --- |
-| **Price AI** | 60% SMA5/SMA20 trend + 40% 10-bar momentum | 0.45 | -0.05 | 2 | 16% of equity | long-only |
-| **News AI** | Five-bar sentiment ×1.5, discounted when it fights the price trend | 0.35 | -0.05 | 2 | 16% of equity | long-only |
-| **Combined AI** | 90% price score + 10% news component | 0.45 | -0.05 | 3 | 13% of equity | long-only |
-
-The agents are long-only by default. Their earlier short side lost money in
-choppy and rising tapes because a weak technical score is not a reliable
-short thesis; removing it keeps the same signal logic but stops the bleed from
-frequent counter-trend shorts. `BaseAgent.allow_short` can re-enable shorts if a
-future strategy earns them.
-
-News scores now use price as a confirmation filter: if sentiment and the
-20-day trend disagree, the news component is cut to 25% of its raw value; if
-the trend is weak (absolute score below 0.12), it is cut to 60%. Before 20
-sessions of history exist, raw sentiment is used unchanged.
-
-The rationale strings shown in the Forecasts tab come directly from these
-calculations, e.g. `price -0.90 + news -0.12 (18 headlines) -> -0.59`.
-
-### Entry, exit and sizing rules
-
-For each signal, in score order:
-
-- If holding a **long** and `score <= exit_threshold`: emit `SELL` for the whole
-  long. With the default `exit_threshold` of `-0.05`, a position is held through
-  mild noise instead of being churned out at the first neutral score.
-- If holding a **short** and `score >= -exit_threshold`: emit `COVER` for the
-  whole short (only when `allow_short` is enabled).
-- If already holding the ticker, skip adding.
-- Stop after `max_entries` new positions per decision.
-- If `score >= entry_threshold`: buy
-  `min(equity × target_position_pct, cash × 0.95)` worth, rounded down to whole
-  shares.
-- If `allow_short` and `score <= -entry_threshold`: short
-  `equity × target_short_pct` worth, rounded down to whole shares. The default
-  strategies do not take this branch.
-- Orders that would exceed the engine's risk limits are rejected later by the
-  exchange.
-
-### Forecast estimates
-
-Each recorded call contains:
-
-- **Direction** — `UP` if the expected percentage is positive, `DOWN` if
-  negative, otherwise `FLAT` (flat is filtered out of the recorded top five).
-- **Expected percent** — the model's estimated five-session move.
-- **Price** — current replay or live price when the call was recorded.
-- **Expected dollars per share** — `price × expected_pct / 100`, computed by the
-  API.
-- **Confidence** — `clamp(0.5 + abs(score) × 0.45, 0.5, 0.95)`.
-- **Rationale**, **simulation time**, **bar index**.
-
-The expected-move formula is:
-
-```text
-expected_pct = score × realized_volatility_20d × sqrt(5) × 100
-```
-
-- `realized_volatility_20d` is the standard deviation of the last 20 daily
-  returns.
-- The result is rounded to two decimals and clamped to **±15%**.
-- If there is not enough history for volatility, it falls back to
-  `score × 3`, also clamped to ±15%.
-
-A **down** estimate is not “the AI loses money”; it is a candidate short. The
-ranking is by absolute expected percentage, so a large drop can rank above a
-large rise.
-
-### When forecasts are recorded
-
-- **Replay:** every agent decision (normally every bar) records a new top five.
-  Rows are replaced for that agent and bar, so old ranks do not accumulate.
-- **Live:** on each agent decision (initial live session creation and then every
-  `LIVE_DECISION_SECONDS`) while the market is open. Between decisions the tab
-  shows the latest batch.
-- Forecasts are dated with the simulation time and are only visible through
-  data at or before the current cursor.
-- Agents need enough history; early bars can produce fewer than five calls.
-- Switching mode or resetting clears all forecasts.
-
-### Running a prediction immediately
-
-The **Predict now** button on the Forecasts tab calls
-`POST /api/market/forecasts/refresh`. It runs all three agents against the
-latest visible bar and replaces that bar's batch, without submitting orders or
-waiting for the next replay tick or live decision interval. It works while
-paused and after hours, but it cannot invent bars: with too little visible
-history it returns fewer calls, and after hours it uses the last available
-session. The response includes `forecasts`, `forecast_meta`, `sim_time` and
-`generated_at`.
-
-The Forecasts tab shows the latest batch per agent, not a full forecast history.
-History is available from `/api/predictions` and
-`/api/agents/{id}/predictions`.
-
-### Forecast settlement and accuracy
-
-Every recorded call is graded once the clock reaches five bars after the call.
-The actual move is measured from the call's recorded price to the close at the
-settlement bar. A call is a **HIT** when the actual direction matches the
-forecast:
-
-- `UP` requires an actual move above zero.
-- `DOWN` requires an actual move below zero.
-- `FLAT` requires an absolute move at or below 0.05 percentage points. Flat calls
-  are normally filtered out before recording.
-
-The Forecasts tab shows an accuracy card per agent with hit rate, average
-absolute error and settled/open call counts. Average error is
-`mean(abs(actual_pct - expected_pct))` in percentage points; it is not a
-signed P&L number. Open calls have not reached their settlement bar yet.
-
-`GET /api/market/forecasts/scorecard` returns the same data, including
-`horizon_sessions`, `settled_calls` and `open_calls`. Settlement is idempotent:
-re-running it only updates calls whose `settled_bar_index` is still empty.
-
----
-
-## 6. The trading engine
-
-### Orders versus trades
-
-- An **order** is an intent. It can be pending, filled, rejected or cancelled.
-- A **trade** is an immutable fill created by the exchange.
-- Manual and AI orders use the same order manager and exchange.
-
-### Order lifecycle
-
-1. `OrderManager.submit()` validates side, ticker, quantity and portfolio, then
-   inserts a `PENDING` order.
-2. On the next tick (replay) or next live poll, `fill_pending()` sees the order.
-3. The exchange validates the order against cash, positions and risk limits
-   using the actual fill price.
-4. A valid order becomes `FILLED`, mutates the portfolio, and creates a trade.
-5. An invalid order becomes `REJECTED` with a reason. It never mutates the
-   portfolio.
-
-Replay fills at the next session's **open**. Live fills at the **latest quote**
-on the poll after submission. Manual and AI orders share this behavior.
-
-### Sides
-
-| Side | Meaning |
-| --- | --- |
-| BUY | Open or add a long. Cannot be used while short the same ticker. |
-| SELL | Reduce a long. Cannot open a short. |
-| SHORT | Open or add a short. Cannot be used while long the same ticker. |
-| COVER | Reduce a short. Cannot open a long. |
-
-Quantities are positive integers; the sign is carried by the position, not the
-order quantity.
-
-### Risk checks
-
-All checks use the fill price and current portfolio equity:
-
-- Side must be one of BUY, SELL, SHORT, COVER.
-- Quantity must be positive.
-- A price must exist.
-- Equity must be positive.
-- BUY:
-  - No existing short in the ticker.
-  - Cash must cover notional plus fee.
-  - Order notional cannot exceed **25% of equity**.
-  - Resulting long market value cannot exceed **25% of equity**.
-- SELL:
-  - Must have a long position.
-  - Cannot sell more than the long quantity.
-- SHORT:
-  - No existing long in the ticker.
-  - Order notional cannot exceed **25% of equity**.
-  - Resulting short market value cannot exceed **20% of equity**.
-  - Total short exposure across the portfolio cannot exceed **50% of equity**.
-- COVER:
-  - Must have a short position.
-  - Cannot cover more than the short quantity.
-  - Cash must cover notional plus fee.
-
-Rejection reasons include `invalid_side`, `invalid_quantity`, `no_price`,
-`account_depleted`, `conflicting_position`, `insufficient_buying_power`,
-`position_limit`, `no_long_position`, `insufficient_long_position`,
-`short_position_limit`, `short_exposure_limit`, `no_short_position`,
-`insufficient_short_position`, `order_size_limit`, `unknown_ticker` and
-`unknown_portfolio`.
-
-### Costs
-
-- **Transaction fee:** 5 basis points (0.05%) of notional, per side, on both
-  buys/covers and sells/shorts.
-- **Short borrow:** 8% annualized on short market value, accrued once per
-  simulated session. Live session creation also accrues it.
-- Fees reduce cash and are recorded on the trade.
-- Borrow fees are tracked per position and per portfolio and reduce cash.
-
-### Accounting identities
-
-```text
-equity = starting_balance + realized_pnl + unrealized_pnl
-         - fees_paid - borrow_fees
-```
-
-- Long: cash pays notional + fee, position is positive.
-- Short: cash receives notional − fee, position is negative (a liability).
-- SELL realized P&L: `(fill_price − average_entry) × quantity`.
-- COVER realized P&L: `(average_entry − fill_price) × quantity`.
-- Average entry is blended when adding to a position.
-- When a position returns to zero, its average entry resets to 0.
-- Portfolio values mark open positions to the latest available price.
-
-### Equity curve and snapshots
-
-At the end of each replay tick (and each live session update), the engine stores
-one `portfolio_snapshots` row per portfolio with cash, positions value and
-equity. These snapshots power maximum drawdown and the equity curve returned by
-the portfolio APIs.
-
----
-
-## 7. Market data and news
-
-### Daily replay data
-
-- Source: Yahoo Finance's public chart endpoint, daily interval.
-- Default range: `5y` (about 1,255 completed sessions for the built-in
-  120-stock + 8-ETF universe). Set `MARKET_HISTORY_RANGE` to change it;
-  changing the range invalidates the old cache and rebuilds the aligned dataset
-  on restart.
-- `10y` also works for the current universe but roughly doubles the bars and
-  simulation time. `max` fails the completeness check because older tickers
-  have much longer histories than newer ones.
-- Only completed sessions are used. While the US market is open, today's partial
-  session is dropped.
-- Tickers are downloaded concurrently, aligned on one shared calendar, and
-  missing sessions are forward-filled with the previous close (volume 0).
-- A dataset is refused if it has fewer than 60 sessions or if any ticker is
-  missing more than half the calendar.
-- Bars are stored in SQLite with a shared `bar_index` per session date.
-- The `data_cache` row records source, fetch time, last bar date, bar count and
-  history range.
-
-### Universe classification
-
-The simulator uses two independent classifications instead of one mutually
-exclusive category:
-
-- **Industry sector** — what the company does. There are 13 sectors:
-  Technology; Banking and finance; Healthcare and pharmaceuticals; Food and
-  agriculture; Retail and consumer goods; Energy and oil; Defense and
-  aerospace; Transportation and logistics; Manufacturing; Telecommunications;
-  Real estate; Utilities; Materials and mining. There is deliberately no
-  "Political" sector.
-- **Exposure tags** — what external forces affect it: Government policy;
-  Defense spending; Trade policy; Geopolitical risk; Interest rates; Energy
-  policy; AI adoption; China exposure. A company can have several.
-
-The default stock universe is **120 stocks** (12 Technology names and 8–10 in
-each other sector). Eight ETFs are kept separate as benchmarks. Agents only see
-the 120 stocks; ETFs are never bought, sold or included in the agent decision
-set. `GET /api/market/universe` returns the full metadata.
-
-`GET /api/market/sectors` attributes each agent's realized P&L minus fees plus
-open unrealized P&L to a sector. `GET /api/market/correlations?window=60` returns
-average pairwise return correlation plus the most and least correlated pairs,
-because 120 names are not 120 independent opportunities.
-
-### Recorded prices and replay windows
-
-Every completed daily bar is written to SQLite as it is imported or generated.
-Live-mode polls continuously update the current forming session, so the same
-record is available when the site is restarted. The Markets panel shows the
-recorded bar/session count and the last recorded session.
-
-Replay does not have to start at the oldest bar. The header range selector
-resets trading and replays one of these windows ending at the newest recorded
-session:
+The header range selector resets the trading accounts and replays one of:
 
 | Preset | Window |
 | --- | --- |
@@ -855,949 +175,406 @@ session:
 | `5y` | Last five years |
 | `all` | All recorded sessions |
 
-The selected preset is persisted in `simulation_runs`, so a restart resumes the
-same replay window. Status payloads expose `replay_preset`, `range_start_bar`,
-`range_end_bar`, `range_bars`, `start_date`, `end_date`, `data_start_date`,
-`data_end_date` and `range_options`.
-
-### Data refresh
-
-- On startup, cached Yahoo daily bars are reused if they are younger than
-  `MARKET_DATA_REFRESH_HOURS` (24 by default).
-- If the cache is stale, the backend downloads again and appends newly completed
-  sessions. It does not duplicate existing sessions.
-- The background loop checks refresh eligibility every 15 minutes.
-- If Yahoo fails during a refresh, the cached dataset is retained and marked
-  stale. If there is no cache on a cold start, synthetic sample data is used.
-
-### Synthetic fallback
-
-- Deterministic seeded OHLCV bars for every configured ticker.
-- Used when `MARKET_DATA_SOURCE=synthetic` or when Yahoo is unreachable on a cold
-  start.
-- The dashboard label becomes **Sample data**, and the data note says synthetic
-  sample prices are in use.
-- Synthetic mode is intended for offline development and tests, not realistic
-  results.
-
-### Live quotes
-
-- Yahoo chart endpoint with `range=1d&interval=1m&includePrePost=false`.
-- One quote per ticker: latest price, previous close, day open/high/low, volume
-  and market time.
-- Market open means a weekday inside 09:30–16:00 New York time and a quote no
-  more than 30 minutes old.
-- Quotes are fetched concurrently with a 10-second timeout.
-- One failed ticker does not fail the whole poll; the error is reported in the
-  live state.
-- Outside the session the latest trade is typically the previous close; no new
-  forming bar is created.
-
-### Yahoo retries
-
-The shared HTTP helper retries HTTP 429, 500, 502, 503 and 504 up to three
-attempts per host.
-
-- Exponential backoff starts at 0.5 seconds.
-- Jitter of up to 10% (capped at 0.25 seconds) is added.
-- The delay is capped at 8 seconds.
-- A numeric `Retry-After` header is honored if longer.
-- Other HTTP errors are raised immediately.
-- Two hosts are tried: `query2.finance.yahoo.com` then
-  `query1.finance.yahoo.com`.
-
-### News
-
-- News is **simulated**, not downloaded.
-- Each session receives one market-wide headline and one to three headlines per
-  ticker.
-- Headline mood is deterministic from the session date and configured seed.
-- Sentiment is in `[-1, 1]`; neutral headlines are damped.
-- Every item carries the bar index at which it becomes visible, so agents never
-  see future headlines.
-- Headline sources are fictional: MarketWire, FinPress, StreetScope, TapeDaily,
-  CapitalPost.
-- The News AI uses a rolling five-session window. Market-wide headlines count at
-  35% weight for a specific ticker.
-
-### Indices
-
-The API also returns synthetic index levels (`SPX` and `IXIC`) derived from the
-universe's weighted daily change. They are present in the overview/snapshot
-payloads but are not currently rendered in a dedicated dashboard panel.
+The selected preset is persisted in `simulation_runs`. A replay can start at the first session of a window while still loading earlier bars as feature context, so the agents are not forced to start with an empty 20-session indicator history. The chart request can be limited to the selected window with `from_bar`.
 
 ---
 
-## 8. Backend architecture and function reference
+## 4. Trading engine
 
-This section lists the important classes and functions by module. Private
-helpers are included where they carry behavior worth knowing.
+### Account and execution model
 
-### Entry point and configuration
-
-| Module | Item | Purpose |
-| --- | --- | --- |
-| `app/main.py` | `cors_origins()` | Parses `CORS_ORIGINS`, strips whitespace/trailing slashes, defaults to `*`. |
-| | `create_app(settings)` | Builds the FastAPI app, lifespan, SQLite, repository, event manager, engine, CORS, routers, health, root and WebSocket. |
-| | `lifespan(app)` | Opens the database, seeds accounts, starts the simulation loop, closes on shutdown. |
-| | `health()` | `GET /api/health`: service status, simulation payload and public settings. |
-| | `root()` | `GET /`: service name, docs path and WebSocket path. |
-| | `market_socket(websocket)` | Accepts `/ws/market`, subscribes to events, sends the initial snapshot, forwards frames. |
-| `app/config.py` | `DEFAULT_UNIVERSE` | 120 stocks across 13 industry sectors plus 8 benchmark ETFs. |
-| | `SPEED_OPTIONS` | `(1, 5, 10, 30)`. |
-| | `_default_db_path()` | Defaults to `backend/data/simulation.db`. |
-| | `_env_float(name, default)` | Safe float environment parsing. |
-| | `Settings` | Frozen dataclass for capital, costs, limits, data, replay and live settings. |
-| | `Settings.as_public_dict()` | Non-secret settings exposed by `/api/health`. |
-
-### Simulation clock (`app/services/simulation_clock.py`)
-
-| Function | Purpose |
+| Rule | Value |
 | --- | --- |
-| `SimulationEngine.__init__` | Creates exchange, order manager, competition manager, empty timeline, live state and lock. |
-| `initialize()` | Loads/replaces data, seeds accounts, loads agents, restores or resets the saved run. |
-| `_ensure_market_data()` | Reuses cache, refreshes stale Yahoo data, or seeds synthetic data; returns whether the dataset changed. |
-| `_seed_synthetic()` | Creates deterministic sample bars/news and marks the source as synthetic. |
-| `_replace_dataset(dataset)` | Replaces all bars/news with a fresh Yahoo dataset. |
-| `_append_dataset(dataset)` | Appends only new completed sessions; returns the count. |
-| `_store_cache(dataset)` | Writes the data-cache metadata row. |
-| `_set_data_info_from_cache(cache, summary, stale=False)` | Builds the dashboard's data-source description. |
-| `_cache_age_hours(cache)` | Age of the cached dataset in hours. |
-| `data_payload()` | Public data-source information, including live polling notes. |
-| `refresh_data_if_due()` | Refreshes stale Yahoo data at most once per configured window. |
-| `play()`, `pause()`, `reset()` | Clock controls. `play()` restarts a completed replay. |
-| `switch_mode(mode)` / `_switch_mode(mode)` | Validates and executes replay/live switching and destructive reset. |
-| `set_speed(speed)` | Stores a validated replay speed. |
-| `interval_seconds` | Seconds between replay ticks: `bar_interval_seconds / speed`. |
-| `tick()` | Advances one replay bar: fills pending orders, marks prices, accrues borrow, runs decisions, snapshots and persists. |
-| `live_tick()` / `_live_tick()` | Polls quotes, updates the live bar, fills pending orders and runs decisions on the live cadence. |
-| `_ensure_live_session(snapshot)` | Creates or updates today's forming live bar and its simulated news. |
-| `_reload_timeline()` | Reloads bars/index and recalculates the live cursor. |
-| `_complete()` | Marks replay complete and cancels pending orders. |
-| `run_loop()` | Async background loop for replay ticks or live polls, plus periodic data refresh. |
-| `shutdown()` | Stops the background task. |
-| `status_payload()` | Status, mode, speed, bar index, dates, progress, decision cadence and live state. |
-| `reference_prices()` | Previous session's closes (basis for daily change). |
-| `quotes_payload()` | Quote rows for every universe ticker at the current bar. |
-| `forecasts_payload()` | Groups the latest top-five calls per AI, adds `expected_usd`, and returns them in agent order. |
-| `settle_forecasts()` | Grades every call whose five-session settlement bar has been reached. |
-| `forecast_scorecard()` | Settles matured calls, then returns per-agent hit rate, average error and open-call counts. |
-| `snapshot()` | Full dashboard frame: simulation, quotes, indices, forecasts, leaderboard, manual account, data info and server time. |
-| `_publish()` | Sends a snapshot to WebSocket subscribers. |
-| `_take_snapshots(sim_time)` | Stores one equity snapshot per portfolio. |
-| `_persist()` | Saves clock status to `simulation_runs`. |
-
-### Repository (`app/database/repositories.py`)
-
-| Function | Purpose |
-| --- | --- |
-| `seed_accounts(settings, now)` | Creates the three agents and four portfolios once. |
-| `get_simulation()` / `upsert_simulation(...)` | Load/save the single simulation state row. |
-| `list_agents()` / `get_agent(id)` | Agent records. |
-| `list_portfolios()` / `get_portfolio(id)` / `get_portfolio_by_agent(agent_id)` / `get_manual_portfolio()` | Portfolio lookups. |
-| `update_cash(portfolio_id, cash, borrow_fees)` | Cash/borrow persistence. |
-| `load_state(portfolio_id)` / `save_state(state)` | Convert between database rows and `PortfolioState`. |
-| `list_positions(portfolio_id)` | Signed positions. |
-| `insert_order(...)` | Queue a `PENDING` order. |
-| `get_order(id)` / `list_orders(portfolio_id, limit)` / `list_pending_orders()` | Order queries. |
-| `mark_order_filled(...)` | Mark filled, store fill price/fees/time. |
-| `cancel_pending_orders(reason)` | Cancel all pending orders. |
-| `mark_order_rejected(id, reason)` | Store a rejection reason. |
-| `insert_trade(...)` / `list_trades(portfolio_id, limit)` | Immutable fills and history. |
-| `insert_prediction(...)` | Record one prediction (used by tests/tools). |
-| `replace_predictions(agent_id, rows)` | Delete one agent's calls for a bar and insert the new batch. |
-| `latest_forecasts(bar_index, per_agent=5)` | Latest batch per agent, ordered by absolute expected move, limited per agent. |
-| `latest_predictions(bar_index)` | One latest row per agent (legacy helper). |
-| `list_predictions(agent_id, limit)` | Prediction history, newest/largest first. |
-| `settle_predictions(up_to_bar, horizon)` | Fills `actual_pct`, `actual_price`, `outcome` and `settled_bar_index` for matured calls. |
-| `forecast_scorecard(horizon)` | Aggregates settled hit rate and mean absolute error per agent. |
-| `count_bars()` | Number of market bars. |
-| `bulk_insert_bars(bars)` / `bulk_insert_news(items)` | Bulk imports. |
-| `get_data_cache()` / `save_data_cache(...)` | Dataset metadata. |
-| `market_summary()` | Bar count and date range. |
-| `plan_new_sessions(session_dates)` | Assigns new bar indices. |
-| `append_market_data(...)` | Appends bars, sessions and news. |
-| `upsert_bars(bars)` | Update live forming bars. |
-| `delete_session(session_date)` | Remove a forming live session. |
-| `replace_market_data(bars, news)` | Replace the whole replay dataset. |
-| `timeline()` / `last_bar_index()` | Bar index/session timeline. |
-| `bars_at(index)` / `bar(ticker, index)` / `bars_for(ticker, up_to, limit)` / `bars_range(...)` | Price lookups. |
-| `prices_at(index)` / `opens_at(index)` / `session_open_prices(date)` | Price maps. |
-| `news_up_to(bar_index, ticker, limit)` | Clock-gated news. |
-| `insert_snapshot(...)` / `snapshots(portfolio_id, limit)` / `latest_snapshot(id)` | Equity history. |
-| `trade_stats(portfolio_id)` | Fees, wins, closed trades, realized P&L and trade counts. |
-| `reset_trading()` | Deletes snapshots, trades, orders, predictions and positions. |
-| `reset_accounts(settings, now)` | Restores cash/borrow and calls `reset_trading()`. |
-
-### Trading engine modules
-
-| Module | Item | Purpose |
-| --- | --- | --- |
-| `accounting.py` | `round_money` | Round to cents. |
-| | `trade_fee(notional, fee_bps)` | Per-side transaction fee. |
-| | `market_value(quantity, price)` | Signed market value. |
-| | `unrealized_pnl(quantity, average_entry, price)` | Open P&L for long or short. |
-| | `borrow_fee(quantity, price, annual_rate, days=1)` | Daily short borrow charge. |
-| | `blended_entry(old_quantity, old_average, added, price)` | Weighted average entry. |
-| `portfolio.py` | `Holding` | Ticker, signed quantity, average entry, realized P&L and borrow fees. |
-| | `Holding.is_long` / `is_short` | Position-side helpers. |
-| | `PortfolioState` | Cash, start balance, holdings and aggregate borrow fees. |
-| | `holding`, `prices_with`, `positions_value`, `equity`, `gross_long_exposure`, `gross_short_exposure`, `position_value`, `unrealized_pnl`, `realized_pnl` | Portfolio calculations. |
-| `risk_limits.py` | `SIDES` | BUY, SELL, SHORT, COVER. |
-| | `OrderRejected` | Exception with machine reason and readable detail. |
-| | `OrderCheck` | Side/ticker/quantity/fill price tuple. |
-| | `validate_order(...)` | All cash, position, short-exposure and order-size checks. |
-| | `_check_order_notional(...)` | 25% cap on orders that increase exposure. |
-| `exchange.py` | `Exchange.execute_order(...)` | Validate, mutate cash/position, mark the order, insert a trade. |
-| | `Exchange.accrue_borrow_fees(...)` | Charge short positions once per session. |
-| | `Exchange.state_summary(...)` | Cash, positions value and equity summary. |
-| `order_manager.py` | `OrderManager.submit(...)` | Validate and queue manual/AI orders. |
-| | `OrderManager.fill_pending(...)` | Fill every pending order at the next price or reject it. |
-
-### AI modules
-
-| Module | Item | Purpose |
-| --- | --- | --- |
-| `base_agent.py` | `MarketContext` | Immutable prices, bars, news, sim time and bar index. |
-| | `OrderIntent` | Ticker, side and quantity produced by an agent. |
-| | `Signal` | Ticker, score, confidence and rationale. |
-| | `BaseAgent.evaluate()` | Abstract strategy method. |
-| | `BaseAgent.step()` | Evaluate, filter, sort, record forecasts, then produce intents. |
-| | `BaseAgent.record_forecasts()` | Evaluate and record a fresh top five without producing intents. Used by manual prediction. |
-| | `BaseAgent._record_predictions()` | Rank non-zero estimates by absolute move and replace the agent's top five for the bar. |
-| | `BaseAgent._signals_to_intents()` | Entry/exit decisions and per-position sizing. |
-| | `BaseAgent._shares_for()` | Floor a dollar budget to whole shares. |
-| | `BaseAgent.position_snapshot()` | Cash, equity and realized P&L helper. |
-| `price_agent.py` | `PriceAgent.evaluate()` | Technical score for every ticker with enough history. |
-| `news_agent.py` | `NewsAgent.evaluate()` | Five-bar sentiment score per ticker. |
-| `combined_agent.py` | `CombinedAgent.evaluate()` | 60/40 blend of price and news. |
-| `features.py` | `sma`, `pct_return`, `realized_volatility` | Rolling statistics. |
-| | `technical_score(bars)` | SMA/momentum score plus diagnostics. |
-| | `expected_move_pct(bars, score, horizon=5)` | Volatility-scaled, clamped forecast. |
-| | `sentiment_score(news, ticker, min_bar)` | Weighted average and latest headline. |
-| | `clamp` | Bound a number. |
-| `predictions.py` | `direction_for(score, threshold)` | Threshold-based UP/DOWN/FLAT helper. |
-| | `confidence_for(score)` | 0.5–0.95 confidence mapping. |
-
-### Competition modules
-
-| Module | Item | Purpose |
-| --- | --- | --- |
-| `manager.py` | `CompetitionManager.__init__` | Holds repository, settings and order manager. |
-| | `load_agents()` | Instantiates Price, News and Combined agents from seeded portfolios. |
-| | `run_decisions(...)` | Builds context, calls every agent, submits intents, records orders. |
-| | `agent_view(...)` | Combines agent metadata, portfolio view and latest prediction. |
-| `leaderboard.py` | `build_portfolio_view(...)` | Positions, cash, equity, metrics, short exposure, optional equity curve. |
-| | `build_leaderboard(...)` | Views for every portfolio, sorted by return then drawdown, with ranks. |
-| `metrics.py` | `max_drawdown_pct` | Largest peak-to-trough decline. |
-| | `win_rate_pct` | Wins / closed trades. |
-| | `total_return_pct` | Equity / starting balance − 1. |
-| | `portfolio_metrics(...)` | Assembles all account metrics. |
-
-### Market data modules
-
-| Module | Item | Purpose |
-| --- | --- | --- |
-| `data_provider.py` | `ReplayWindow` | Synthetic date/bars metadata. |
-| | `next_business_day`, `session_dates`, `bar_times` | Calendar helpers. |
-| | `generate_bars(...)` | Deterministic synthetic OHLCV generator. |
-| | `index_levels(...)` | Synthetic SPX/IXIC levels from universe changes. |
-| | `BASE_PRICES`, `BASE_VOLUME` | Synthetic starting prices/volumes. |
-| `data_processor.py` | `clamp`, `quote_payload`, `moving_average` | Quote formatting and averages. |
-| `yahoo_http.py` | `retry_delay(...)` | Exponential backoff with jitter/Retry-After. |
-| | `request_json(...)` | JSON GET with retries for 429/5xx. |
-| | `HOSTS`, `RETRYABLE_STATUS` | Yahoo hosts and retryable codes. |
-| `yahoo_provider.py` | `DailyDataset` | Bars, tickers, fetch time, last date, interval/source. |
-| | `last_completed_session()` | Newest completed US trading day. |
-| | `_request`, `_ticker_days` | Fetch and convert one ticker's daily series. |
-| | `fetch_daily_bars(...)` | Concurrent download, calendar alignment, validation. |
-| `live_provider.py` | `LiveQuote` / `LiveSnapshot` | One quote / a complete poll. |
-| | `market_hours_open(...)` | Weekday regular-session check. |
-| | `parse_quote(...)` | Parse Yahoo chart metadata/series into a quote. |
-| | `fetch_live_quotes(...)` | Concurrent polls, staleness and market-open decision. |
-| `news_provider.py` | `generate_news_for_dates(...)` | Headlines aligned to real trading dates. |
-| | `generate_news(...)` | Headlines aligned to synthetic bars. |
-
-### API modules
-
-| Module | Routes | Purpose |
-| --- | --- | --- |
-| `api/simulation.py` | `/api/simulation/*` | Status, mode, start, pause, reset, speed. |
-| `api/market.py` | `/api/market/*` | Overview, quote, history, news. |
-| `api/agents.py` | `/api/agents*` | Agent list/detail, portfolios, prediction history. |
-| `api/portfolios.py` | `/api/leaderboard`, `/api/portfolios*` | Rankings and portfolio views. |
-| `api/orders.py` | `/api/orders`, `/api/trades`, `/api/predictions` | Manual orders and activity history. |
-| `api/deps.py` | `get_repo`, `get_engine` | FastAPI dependency accessors. |
-
----
-
-## 9. API reference
-
-Base URL: `http://localhost:8000` in development, or your deployed backend.
-All responses are JSON unless noted.
-
-### System
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/` | Service name, docs path and WebSocket path. |
-| GET | `/api/health` | `status: ok`, full simulation status and public settings. |
-| GET | `/docs` | Swagger UI (FastAPI). |
-
-### Market
-
-| Method | Path | Query/params | Purpose |
-| --- | --- | --- | --- |
-| GET | `/api/market/overview` | none | Simulation status, quotes, indices, forecasts, `forecast_meta`, universe metadata and data-source info. |
-| GET | `/api/market/universe` | none | 120 stock profiles, 8 ETFs, 13 sectors and 8 exposure tags. |
-| GET | `/api/market/sectors` | none | Per-agent sector attribution: realized, unrealized, fees and contribution to return. |
-| GET | `/api/market/correlations` | `window` 10–250, default 60 | Average pairwise return correlation and most/least correlated pairs. |
-| POST | `/api/market/forecasts/refresh` | none | Run all three AIs now and record fresh calls without placing orders. |
-| GET | `/api/market/forecasts/scorecard` | none | Settled five-session hit rates, average errors and open-call counts per AI. |
-| GET | `/api/market/quote/{ticker}` | path ticker | Current bar quote for a universe ticker. 404 for unknown ticker or missing bar. |
-| GET | `/api/market/history/{ticker}` | `limit` 1–780, default 200; optional `from_bar` | Visible bars up to the cursor plus SMA5/SMA20 and data info. |
-| GET | `/api/market/news/{ticker}` | path ticker; `limit` 1–100, default 30 | Visible headlines for a ticker, or `ALL`/`MARKET`. |
-
-`overview.forecasts` is grouped:
-
-```json
-[
-  {
-    "agent_id": 1,
-    "agent_name": "Price AI",
-    "model_type": "price",
-    "calls": [
-      {
-        "rank": 1,
-        "ticker": "AMD",
-        "direction": "UP",
-        "expected_pct": 9.37,
-        "price": 537.37,
-        "expected_usd": 50.35,
-        "confidence": 0.88,
-        "rationale": "SMA5 ... vs SMA20 ...",
-        "sim_time": "2026-02-19T16:00:00",
-        "bar_index": 34
-      }
-    ]
-  }
-]
-```
-
-### Agents
-
-| Method | Path | Query | Purpose |
-| --- | --- | --- | --- |
-| GET | `/api/agents` | none | All agents with portfolio views and their latest recorded call. |
-| GET | `/api/agents/{agent_id}` | path id | One agent, portfolio and latest call. |
-| GET | `/api/agents/{agent_id}/portfolio` | path id | Portfolio, positions and full equity curve. |
-| GET | `/api/agents/{agent_id}/predictions` | `limit` 1–100, default 25 | Prediction history for one agent. |
-
-`agent_id` is the database agent id, not the portfolio id.
-
-### Portfolios and leaderboard
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/leaderboard` | All accounts, ranked by `total_return_pct` then max drawdown. |
-| GET | `/api/portfolios` | Every portfolio view without equity history. |
-| GET | `/api/portfolios/manual` | The manual account with positions and equity curve. |
-| GET | `/api/portfolios/{portfolio_id}` | Any portfolio with positions and equity curve. |
-
-### Manual orders and activity
-
-| Method | Path | Query/body | Purpose |
-| --- | --- | --- | --- |
-| POST | `/api/orders` | JSON body below | Queue a manual market order. Returns 201. |
-| GET | `/api/orders` | `portfolio_id?`, `limit` 1–200, default 50 | Order history. |
-| GET | `/api/trades` | `portfolio_id?`, `limit` 1–200, default 50 | Fill history. |
-| GET | `/api/predictions` | `agent_id?`, `limit` 1–200, default 50 | Prediction history. |
-
-Order body:
-
-```json
-{
-  "ticker": "AAPL",
-  "side": "SHORT",
-  "quantity": 5,
-  "portfolio_id": null
-}
-```
-
-- `portfolio_id` is optional. Omit it or send `null` to use the manual account.
-- Only manual portfolios can be traded through this endpoint.
-- `side` must be `BUY`, `SELL`, `SHORT` or `COVER`.
-- `quantity` must be an integer from 1 to 1,000,000.
-- A successful response includes `order`, `status: "PENDING"`, a `message`,
-  `indicative_price`, `estimated_fee` and the current `simulation` status.
-- An invalid order returns HTTP 400 with `detail.reason` and
-  `detail.message`.
-
-Example:
-
-```bash
-curl -X POST http://localhost:8000/api/orders \
-  -H 'Content-Type: application/json' \
-  -d '{"ticker":"AAPL","side":"BUY","quantity":5}'
-```
-
-### Simulation controls
-
-| Method | Path | Body | Purpose |
-| --- | --- | --- | --- |
-| GET | `/api/simulation/status` | none | Current clock status. |
-| POST | `/api/simulation/start` | none | Start/resume; restarts a completed replay. Returns status and snapshot. |
-| POST | `/api/simulation/pause` | none | Pause a replay. Returns status. |
-| POST | `/api/simulation/reset` | none | Reset accounts/history and the cursor. Returns status and snapshot. |
-| POST | `/api/simulation/speed` | `{"speed": 5}` | Set 1, 5, 10 or 30. Returns status; 400 for other values. |
-| POST | `/api/simulation/mode` | `{"mode": "live"}` | Switch replay/live; resets accounts. Returns status and snapshot. |
-| POST | `/api/simulation/range` | `{"preset": "1w"}` | Reset accounts and replay `1w`, `1m`, `3m`, `ytd`, `1y`, `5y` or `all`. |
-
-### Simulation status fields
-
-```json
-{
-  "status": "running",
-  "mode": "replay",
-  "speed": 5,
-  "speed_options": [1, 5, 10, 30],
-  "bar_index": 34,
-  "total_bars": 1255,
-  "sim_time": "2026-01-02T16:00:00",
-  "session_date": "2026-01-02",
-  "start_date": "2025-01-02",
-  "end_date": "2025-12-31",
-  "progress_pct": 13.9,
-  "decision_every_bars": 1,
-  "autostart": false
-}
-```
-
-Live mode adds a `live` object:
-
-```json
-{
-  "market_open": true,
-  "last_poll": "2026-11-12T14:15:00+00:00",
-  "session_date": "2026-11-12",
-  "poll_seconds": 60,
-  "decision_seconds": 300,
-  "last_decision": "2026-11-12T14:15:01+00:00",
-  "error": null,
-  "next_poll_in": 43.2,
-  "reference": "Yahoo Finance"
-}
-```
-
-### Error conventions
-
-- `400` — invalid mode/speed, rejected order, non-manual portfolio order.
-- `404` — unknown ticker, agent, portfolio, or missing manual portfolio/bar.
-- `422` — FastAPI/Pydantic request validation failure.
-- Rejections include a machine-readable `reason` and human-readable `message`
-  where applicable.
-
----
-
-## 10. WebSocket reference
-
-**URL:** `ws://localhost:8000/ws/market` (or `wss://...` behind HTTPS)
-
-On connect, the server immediately sends one full snapshot. Every subsequent
-frame is also a full snapshot with `type: "snapshot"`; there are no deltas.
-
-```json
-{
-  "type": "snapshot",
-  "simulation": { "...": "simulation status fields" },
-  "quotes": [
-    {
-      "ticker": "AAPL",
-      "price": 275.4,
-      "open": 274.1,
-      "high": 276.8,
-      "low": 273.9,
-      "volume": 4200000,
-      "previous_close": 273.8,
-      "change": 1.6,
-      "change_pct": 0.58,
-      "ts": "2026-01-02T16:00:00"
-    }
-  ],
-  "indices": [
-    { "symbol": "SPX", "name": "S&P 500 (sim)", "level": 6850, "change_pct": 0.4 }
-  ],
-  "forecasts": [ "... grouped agent forecasts ..." ],
-  "leaderboard": [ "... ranked portfolio views ..." ],
-  "manual": { "... manual portfolio view ..." },
-  "data": { "... data source and live info ..." },
-  "server_time": "2026-11-12T14:15:00+00:00"
-}
-```
-
-- Frames are published on ticks, live polls, play/pause/reset, mode changes and
-  data refreshes.
-- Each subscriber has a queue of 8 frames. If a client falls behind, the oldest
-  frame is dropped rather than stalling the clock.
-- If the socket is unavailable, the frontend polls REST every 3 seconds.
-- The socket has no authentication and no per-client subscriptions.
-
----
-
-## 11. Database reference
-
-Default file: `backend/data/simulation.db` (configurable with `DB_PATH`). SQLite
-uses WAL mode and foreign keys.
-
-| Table | Columns and purpose |
-| --- | --- |
-| `agents` | `id`, `name`, `model_type`, `description`, `created_at`. Three seeded strategies. |
-| `portfolios` | `id`, `agent_id`, `name`, `kind` (`agent`/`manual`), `starting_balance`, `cash`, `borrow_fees`, `created_at`. Four seeded accounts. |
-| `positions` | `id`, `portfolio_id`, `ticker`, `quantity` (signed), `average_entry`, `realized_pnl`, `borrow_fees`; unique per portfolio/ticker. |
-| `orders` | `id`, `portfolio_id`, `ticker`, `side`, `quantity`, `status`, `reason`, `source`, `submitted_at`, `sim_time`, `fill_price`, `filled_at`, `fees`. |
-| `trades` | `id`, `order_id`, `portfolio_id`, `ticker`, `side`, `quantity`, `price`, `fees`, `realized_pnl`, `sim_time`. Immutable fills. |
-| `predictions` | `id`, `agent_id`, `ticker`, `horizon`, `direction`, `confidence`, `expected_pct`, `price`, `rationale`, `sim_time`, `bar_index`, `settled_bar_index`, `actual_pct`, `actual_price`, `outcome`. |
-| `market_data` | `ticker`, `ts`, `session_date`, `bar_index`, `open`, `high`, `low`, `close`, `volume`; primary key `(ticker, ts)`. |
-| `news` | `id`, `ticker`, `headline`, `source`, `sentiment`, `ts`, `bar_index`. |
-| `simulation_runs` | Single row (`id=1`): `status`, `mode`, `speed`, dates, `cursor`, `total_bars`, `replay_preset`, `range_start_date`, `range_end_date`, `updated_at`. |
-| `data_cache` | Single row: source, interval, fetch time, last bar date, tickers, bar count. |
-| `portfolio_snapshots` | `id`, `portfolio_id`, `ts`, `bar_index`, `cash`, `positions_value`, `equity`. Equity curve and drawdown source. |
-
-Order statuses: `PENDING`, `FILLED`, `REJECTED`, `CANCELLED`.
-
-Automatic migrations add `simulation_runs.mode` and
-`predictions.expected_pct`, `bar_index`, `price`, `settled_bar_index`,
-`actual_pct`, `actual_price`, `outcome`, plus the settlement index, to existing
-databases.
-
-`reset_trading()` deletes snapshots, trades, orders, predictions and positions.
-`reset_accounts()` also restores every portfolio's cash and clears borrow fees.
-
----
-
-## 12. Frontend architecture and function reference
-
-### App shell
-
-| Item | Purpose |
-| --- | --- |
-| `App` | Owns the selected tab, action busy state, action error and header callbacks. |
-| `TABS` | Forecasts, Leaderboard, Markets, Trading, Activity; Forecasts is leftmost. |
-| `useMarketStream()` | Loads initial snapshot, opens WebSocket, reconnects, falls back to polling, exposes `refresh`. |
-| `action(path, body)` | POSTs a header/order action, refreshes the snapshot, handles errors and busy state. |
-
-### Components
-
-| Component | Purpose |
-| --- | --- |
-| `Header` | Brand, date, selected window, status, Replay/Live switch, range selector, speed buttons, Start/Pause/Restart, Reset, replay progress. |
-| `Overview` | Leaderboard, Markets quote list and Your account panel. |
-| `Leaderboard` | Ranked account table. |
-| `Markets` | Ticker buttons, selected quote header, chart, stats and data note. |
-| `PriceChart` | SVG close-price line/area chart with grid, marker, start/end dates. |
-| `Trading` | Manual ticket, account panel, positions and recent orders. |
-| `Activity` | Global fills and orders tables. |
-| `Forecasts` | Hero call, per-agent top-five lists and forecast note. |
-| `Panel` | Reusable titled section. |
-| `Empty` | Empty-state paragraph. |
-| `Loading` | Loading text. |
-
-### Buttons in the entire UI
-
-| Location | Button count | Action |
-| --- | --- | --- |
-| Header | 2 | Switch to Replay / Live. |
-| Header | 4 | Select 1× / 5× / 10× / 30×. |
-| Header | 1 | Start, or Restart when completed. |
-| Header | 1 | Pause when replay is running. |
-| Header | 1 | Reset. |
-| Tabs | 5 | Switch panel. |
-| Markets | 8 | Select a ticker. |
-| Trading | 4 | Buy, Sell, Short, Cover. |
-
-There are no other clickable controls. Header and trading buttons are disabled
-while their action is in flight.
-
-### Client functions
-
-| Function | Purpose |
-| --- | --- |
-| `apiUrl(path)` | Prefixes a path with `VITE_API_BASE`, stripping a trailing slash. |
-| `wsMarketUrl()` | Uses `VITE_WS_URL`, derives `ws(s)://...` from the API base, or uses the page origin. |
-| `parse(response)` | Parses JSON and converts HTTP errors into readable `Error` messages. |
-| `apiGet(path)` | JSON GET. |
-| `apiPost(path, body)` | JSON POST with an empty-object fallback. |
-| `useMarketStream().refresh()` | Fetches overview, leaderboard and manual portfolio together. |
-| `money(value)` | USD formatting. |
-| `signedMoney(value)` | USD with an explicit sign. |
-| `signedPct(value)` | Percentage with an explicit plus sign for non-negative values. |
-| `signedShares(quantity)` | Signed share count. |
-| `toneClass(value)` | Returns `pos`, `neg` or `flat` for colour styling. |
-| `simDate(ts)` | Formats a timestamp as a short date. |
-
-### Data flow
-
-1. `useMarketStream` fetches `/api/market/overview`, `/api/leaderboard` and
-   `/api/portfolios/manual`.
-2. The WebSocket sends full snapshots and replaces the client snapshot.
-3. Tab components receive the snapshot as props.
-4. Markets and Trading fetch additional history/orders as needed.
-5. Header and order actions POST to the API and refresh the snapshot.
-
----
-
-## 13. Configuration
-
-### Backend environment variables
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CORS_ORIGINS` | `*` | Comma-separated exact allowed browser origins, with scheme and no trailing slash. Use `*` only for a demo. |
-| `SIM_AUTOSTART` | `1` | `0`/`false`/`no` boots paused. |
-| `SIM_MODE` | `replay` | Initial mode: `replay` or `live`. |
-| `MARKET_DATA_SOURCE` | `yahoo` | `yahoo` for real daily bars; `synthetic` for deterministic offline data. |
-| `MARKET_DATA_REFRESH_HOURS` | `24` | Minimum age before appending newly completed sessions. |
-| `MARKET_HISTORY_RANGE` | `5y` | Yahoo chart range: `6mo`, `1y`, `2y`, `5y`, `10y`. Changing it rebuilds the cache. |
-| `LIVE_POLL_SECONDS` | `60` | Live quote poll interval. |
-| `LIVE_DECISION_SECONDS` | `300` | Agent re-evaluation interval in live mode. |
-| `DB_PATH` | `backend/data/simulation.db` | SQLite file path. |
-| `LOG_LEVEL` | `INFO` | Python log level. |
-
-Some values are read at import/startup time. Restart the backend after changing
-them.
-
-### Frontend environment variables
-
-| Variable | Purpose |
-| --- | --- |
-| `VITE_API_BASE` | Backend URL, no trailing slash. Empty means same-origin `/api`. |
-| `VITE_WS_URL` | Full WebSocket URL, e.g. `wss://api.example.com/ws/market`. |
-
-These are build-time variables in Vite. They are baked into the generated JS;
-changing them requires a rebuild and redeploy.
-
-### Fixed simulation constants
-
-| Setting | Value |
-| --- | --- |
-| Starting balance | $10,000 per portfolio |
-| Tradable universe | 120 US-listed stocks across 13 industry sectors |
-| Benchmarks | SPY, QQQ, IWM, DIA, EFA, EEM, GLD, TLT (not traded by agents) |
+| Starting capital | $10,000 per portfolio |
+| Order type | Simulated market order |
+| Replay fill | Next bar's open |
+| Live fill | Next poll after the order is queued, while the market is open |
 | Transaction fee | 5 bps per side |
-| Short borrow | 8% annualized |
+| Short borrow | 8% annualized, accrued when a new session starts |
 | Max long position | 25% of equity |
 | Max short position | 20% of equity |
 | Max total short exposure | 50% of equity |
 | Max order notional | 25% of equity |
-| Speeds | 1×, 5×, 10×, 30× |
-| Replay bar interval | 1 second at 1× |
-| Default replay speed | 5× |
+| Agent direction | Long-only |
+| Manual direction | Long or short |
+
+An order can be `PENDING`, `FILLED`, `REJECTED` or `CANCELLED`. The order manager checks that the portfolio exists, the ticker is in the configured universe, the side is valid and the quantity is a positive integer. The exchange then applies buying-power, position-size, short-exposure and fee checks. Replay orders fill on the next clock tick; live orders fill when a subsequent live poll provides usable prices.
+
+### Portfolio accounting
+
+- Long positions increase in value when price rises; short positions decrease equity when price rises.
+- Cash includes proceeds from shorts, but the short itself is a liability in equity.
+- Realized P&L, fees and borrow costs are stored separately.
+- Equity is marked at the latest visible close, not at the decision price.
+- Portfolio snapshots are written per replay bar or live update for drawdown and equity-curve queries.
+
+### How look-ahead is prevented
+
+The most important correctness rule is:
+
+> A decision made from the close at time `t` cannot fill at that same close.
+
+The agent context is built from bars with `bar_index <= cursor` and news with `bar_index <= cursor`. Orders submitted after that decision are pending until the next bar's open. In live mode, the current forming daily bar can be updated by quotes, but the agent decision and subsequent fill still occur on separate polls.
+
+Forecasts are recorded at the decision time and graded against the close exactly five sessions later. The settlement query only matches a target bar that has already become visible, so an open forecast cannot be scored with future data.
+
+### Replay versus live
+
+**Replay** walks cached daily bars. One bar is one completed trading day. The default speed is 5×; the engine can pause, reset, change speed, or replay a selected date window.
+
+**Live** polls Yahoo quotes every 60 seconds during the US session, maintains one forming daily bar per session, and lets agents re-evaluate every 300 seconds. When the market is closed, prices are last known values and no new live decisions or fills occur. Free hosting can put the process to sleep, which pauses both replay and live background work.
 
 ---
 
-## 14. Deployment
+## 5. Algorithmic trading agents
 
-### Backend on Render
+The competition combines three **deterministic heuristic strategies** with one learned model. The heuristics use hand-designed features and fixed thresholds; Neural AI uses a persisted scikit-learn MLP trained from recorded simulator data.
 
-The repository includes `render.yaml` with a Python web service rooted at
-`backend`:
+### Price AI — technical baseline
 
-- Build: `pip install -r requirements.txt`
-- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Health check: `/api/health`
-- Python version: `3.12.3` via `PYTHON_VERSION` (required because some pinned
-  wheels are unavailable on newer Python versions).
+**Inputs:** Last 120 visible daily bars per stock, with cash and portfolio state.
 
-Manual settings have the same values. Set `CORS_ORIGINS` to the static site's
-exact origin, for example:
+**Features:** 5-session SMA, 20-session SMA, 10-bar momentum and 20-day realized volatility.
+
+**Signal:** `0.60 × tanh((SMA5/SMA20 − 1) × 120) + 0.40 × tanh(10-bar return × 25)`, clipped to [−1, 1].
+
+**Decision:** Enter when the score exceeds `0.45`; allow up to two entries; target 16% of equity per position; exit when the score falls below `−0.05`. Long-only.
+
+**Forecast:** The score sets direction and conviction; expected move is `score × 20-day volatility × √5`, bounded to ±15%. The five largest absolute expected moves are recorded.
+
+**Limitations:** Trend following struggles in choppy or rapidly reversing markets; a moving-average cross is not a fundamental valuation model; vol-scaled forecasts are not calibrated probabilities.
+
+### News AI — sentiment baseline
+
+**Inputs:** Simulated headlines visible within the last five sessions, plus the current price context.
+
+**Features:** Sentiment score for the ticker and market-wide headlines. Ticker headlines receive weight 1.0; market headlines receive 0.35. The score is scaled by 1.5 and clipped to [−1, 1].
+
+**Signal conditioning:** If news and price trend disagree, the news component is cut to 25% of its raw value. If trend is weak (absolute score below 0.12), the news component is cut to 60%. This prevents headline noise from overriding a strong technical trend.
+
+**Decision:** Enter above `0.35`; allow up to two entries; target 16% of equity; exit below `−0.05`. Long-only.
+
+**Forecast:** The conditioned score is mapped to a five-session expected move with the same volatility-scaled formula, bounded to ±15%; the five largest absolute moves are recorded.
+
+**Limitations:** The headlines are generated, not archived historical news. The strategy cannot distinguish a material filing from a repeated market story, and sentiment is a coarse scalar rather than an event model.
+
+### Combined AI — hybrid baseline
+
+**Inputs:** The Price AI technical score and the news component described above.
+
+**Signal:** `0.90 × technical score + 0.10 × news component`, clipped to [−1, 1]. The Combined agent is therefore primarily a price strategy with a small sentiment tie-breaker.
+
+**Decision:** Enter above `0.45`; allow up to three entries; target 13% of equity; exit below `−0.05`. Long-only.
+
+**Forecast:** The combined score is mapped to a five-session expected move with the same volatility-scaled formula, bounded to ±15%; the five largest absolute moves are recorded.
+
+**Limitations:** The fixed 90/10 weight was selected during research and is not re-estimated online. A small news weight can still add correlated noise, and the hybrid inherits the trend strategy's regime sensitivity.
+
+### Neural AI — live learned ranking
+
+**Inputs:** The same 120-bar market context, current headlines and portfolio state as the other agents, plus the current model artifact.
+
+**Features:** The 26 point-in-time features used by the offline neural network: technical trend, momentum, SMA cross, volatility, 5/20-day returns, news score and count, price×news, market trend, volume trend, RSI(14), range position, distance from SMA20/SMA50, 1/3/10-day returns, volatility ratio, market 5/20-day returns and volatility, relative strength versus market and sector, market breadth, and one-day news.
+
+**Training:** The model trains from bars and headlines already stored in SQLite. A chronological 80/20 split validates the network, and the final model is refit on all labeled rows up to the current replay cursor (or the latest live bar). The target is the cross-sectional percentile rank of the next five-session return. Training runs in a background thread; a failed run leaves the previous artifact active. The backend starts a run automatically when a window already has enough prior history; the full-history replay starts at bar 0, so its first model must be trained after the replay has advanced.
+
+**Signal:** Raw predictions are ranked across the eligible universe and converted to percentiles. The signal is `2 × percentile − 1`, so the highest-ranked stock scores near `+1` and the lowest near `−1`.
+
+**Decision:** Enter above `0.64` (roughly the 82nd percentile); allow up to ten entries; target 10% of equity per position; exit at or below `0.0`. Long-only.
+
+**Forecast:** The percentile score feeds the same five-session expected-move formula as the heuristics, bounded to ±15%; the five largest absolute expected moves are recorded.
+
+**Limitations:** A model trained through bar N is deliberately not used to score bar N or any earlier replay bar, so a fresh deployment or reset may leave Neural AI idle until the next unseen decision. Training is a point-in-time snapshot, not continual online learning; the network can overfit and its validation rank IC has been weak. Model artifacts live on local disk, which is ephemeral on free Render services.
+
+### Manual portfolio
+
+The manual account uses the same exchange and fees but is not an algorithmic strategy. It can buy, sell, short and cover. It is included in the leaderboard as a separate account, not as an AI agent.
+
+---
+
+## 6. Machine-learning experiments
+
+### Preliminary logistic baseline
+
+A dependency-free logistic regression was added to test whether a simple learned model could beat the heuristics. Each row uses price and news features:
+
+- Price trend, momentum, SMA cross and realized volatility.
+- 5-session and 20-session returns.
+- News score, headline count and price-news interaction.
+- A market-trend feature.
+
+The label is whether the close five sessions later is above the current close. Features are standardized using the training window only. The model is fit chronologically and evaluated on a later holdout.
+
+**Result:** approximately **53.04%** directional accuracy. Its held-out trading return was about **+94.2%**, versus **+106.1%** for the Combined heuristic on the same research path. The result is preliminary; the live Neural AI uses a separately trained ranking model rather than these logistic weights.
+
+### Six-model walk-forward experiment
+
+The later experiment gives every model the same objective and constraints:
+
+| Model | Role |
+| --- | --- |
+| Price AI | Technical baseline |
+| News AI | Simulated-sentiment baseline |
+| Combined AI | Hybrid baseline |
+| Random Forest | Nonlinear ML baseline |
+| Gradient Boosting | Structured prediction baseline |
+| Neural Network | MLP baseline for more complex patterns |
+| Neural AI (live) | MLP ranking agent trained from simulator history |
+
+The tree models receive 11 compact features per stock/session:
+
+`trend`, `momentum`, `SMA cross`, `volatility`, `5-day return`, `20-day return`, `news`, `news count`, `price×news`, `market trend`, `volume trend`.
+
+The neural network also receives 15 point-in-time context features: RSI, 20-day range position, distance from the 20/50-day averages, 1/3/10-day returns, short-versus-long volatility, market 5/20-day returns and volatility, relative strength versus the market and sector, market breadth, and one-day news. The trees predict the raw five-session forward return, clipped to ±25%. The neural network predicts the cross-sectional percentile rank of that return, which removes the common market move and improved its validation ranking. Rank targets were tested on the tree models and rejected because they reduced their portfolio returns. The live agent uses the same 26-feature layout and rank target, but trains only on data available at its cutoff.
+
+The portfolio rule is identical across models:
+
+- Rank the cross-sectional scores each session.
+- Enter the top ten names above the 82nd percentile.
+- Exit below the 50th percentile.
+- Hold at most ten names at 10% of equity each.
+- Fill at the next open and pay 5 bps per side.
+- Long-only, with no leverage.
+
+The ML implementations are scikit-learn's Random Forest, Histogram Gradient Boosting and a two-layer MLP. The experiment dependency is kept separate from production in `backend/requirements-experiments.txt`.
+
+**Not implemented:** deep learning, reinforcement learning, continuous online retraining, alternative data, or a production model-serving path. The MLP is an experimental baseline, not an agent in the live leaderboard.
+
+---
+
+## 7. Evaluation methodology
+
+### Metrics
+
+| Metric | Definition |
+| --- | --- |
+| Total return | `final equity / starting equity − 1` |
+| Annualized return | Compounded yearly return using the evaluation length |
+| Maximum drawdown | Largest peak-to-trough decline in marked equity |
+| Sharpe ratio | Mean daily return divided by daily volatility, annualized; the reported experiment uses a zero risk-free rate |
+| Volatility | Standard deviation of daily returns, annualized |
+| Win rate | Share of closed trades with positive realized P&L |
+| Trade count | Number of executed fills |
+| Turnover | Traded notional divided by average equity |
+| Transaction costs | 5 bps per side, plus 8% annualized borrow on open shorts in the simulator |
+| Regime return | Return split into bull/bear subsets using SPY versus its 200-day average |
+| Correlation | Average pairwise and same-sector/cross-sector return correlation |
+
+Win rate is implemented for the live leaderboard. The offline experiment records fill counts but does not export closed-trade win rate, so the results table reports trade count and risk metrics instead.
+
+### Experimental controls
+
+- Identical starting capital: $10,000.
+- Identical evaluation windows for every model.
+- Identical execution rule: next-open fills and 5 bps per side.
+- No shorting in the experiment, so borrow costs are not a differentiator.
+- Features use only bars, volume and headlines at or before the scoring close.
+- Models are standardized on training data only.
+- Training labels whose five-session future crosses a validation boundary are purged.
+- No model is refit on its own validation period.
+
+### Walk-forward splits used
+
+The offline experiment used 10 years of Yahoo data, ending on **2026-11-13**. The first feature row is **2016-12-13** because the technical features require a warm-up. The evaluation is the final five years, split into five annual unseen windows:
 
 ```text
-https://my-dashboard.onrender.com
+Fold 1  train: 2016-12-13 .. 2021-11-12   validate: 2021-11-15 .. 2022-11-14
+Fold 2  train: 2016-12-13 .. 2022-11-14   validate: 2022-11-15 .. 2023-11-14
+Fold 3  train: 2016-12-13 .. 2023-11-14   validate: 2023-11-15 .. 2024-11-13
+Fold 4  train: 2016-12-13 .. 2024-11-13   validate: 2024-11-14 .. 2025-11-13
+Fold 5  train: 2016-12-13 .. 2025-11-13   validate: 2025-11-14 .. 2026-11-13
 ```
 
-Multiple origins are comma-separated. No trailing slash, include `https://`.
+This is an expanding-window design, not a fixed rolling five-year window. The first validation period is genuinely unseen by the initial model. Later folds add earlier validation years to training, which is the intended walk-forward behavior.
 
-Render's free filesystem is ephemeral: SQLite data and trade history reset on
-restart/redeploy. Attach a Render disk and set `DB_PATH` to a path on it for
-durable results.
+For a training row at offset `t` with a five-session label, the experiment requires `t + 5` to finish before the validation start. The first fold's last training label is 2021-11-12, while validation starts on 2021-11-15. That purge is verified in `backend/tests/test_experiment.py`.
 
-#### Free-tier sleep and live mode
+### Correlated observations
 
-A free Render web service sleeps after roughly 15 minutes without incoming
-traffic. When it sleeps, the background clock and live poll stop, so forecasts
-and fills pause until a request wakes the service again. An open dashboard is
-not a guaranteed keep-alive, and a closed tab definitely is not.
+The universe has 128 symbols, but they are not 128 independent experiments. Sector peers and broad-market exposure cause correlated returns. The simulator reports average pairwise correlation and same-sector/cross-sector correlation to make that duplication visible. Statistical significance would require block-aware resampling or a proper dependence model; neither is currently implemented.
 
-This repository includes three wake-up paths:
+---
 
-- **Backend self-ping.** While the process is awake, it requests its own
-  `/api/health` every `SELF_KEEPALIVE_SECONDS` (default four minutes). On Render
-  it derives the URL from `RENDER_EXTERNAL_URL`; set `KEEPALIVE_URL` explicitly
-  if the service is hosted elsewhere. Because this is an inbound request, one
-  successful wake is enough to keep the service from idling out again.
-- **Frontend heartbeat.** The dashboard calls `/api/health` every four minutes
-  while it is open.
-- **GitHub Actions fallback.** `.github/workflows/keep-alive.yml` is scheduled
-  every five minutes and can be started manually from the Actions tab.
+## 8. Experimental results
 
-Scheduled GitHub Actions can be delayed or skipped, which is why the backend
-self-ping is the primary path. An external uptime monitor is the most
-independent fallback; it does not depend on the repository or an open tab. A
-free Render workspace grants about 750 instance hours per month, so keeping one
-service awake around the clock consumes nearly the entire allowance. Use a paid
-instance if the simulator must stay available every day. Live decisions still
-only occur while the US market is open; after hours the last forecasts are shown
-and no new fills occur.
+### 5-year simulator replay (illustrative, not walk-forward)
 
-### Frontend on a static host
+The full-period heuristic replay over the default 5-year dataset produced:
 
-Build:
+| Agent | Total return |
+| --- | ---: |
+| Combined AI | +89.67% |
+| News AI | +38.90% |
+| Price AI | +36.84% |
+
+This is a **single full-period replay** using fixed heuristic weights. It is not an out-of-sample walk-forward result and should not be presented as validated alpha. It is useful for checking that the accounting, fees, data pipeline and strategy implementation behave coherently over a long run. The live simulator uses its own agent thresholds; the walk-forward experiment below uses one common portfolio rule and is not a replay of the live leaderboard.
+
+### Six-model 10-year walk-forward experiment
+
+After 5 bps per side, over 2021-11-15 to 2026-11-13:
+
+| Model | Total return | CAGR | Volatility | Sharpe | Max drawdown | Trades | Final equity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Price AI | **+101.45%** | 15.10% | 16.81% | 0.92 | 17.49% | 3,983 | **$20,145** |
+| News AI | +22.57% | 4.17% | 14.40% | 0.36 | 28.37% | 6,473 | $12,257 |
+| Combined AI | **+133.46%** | 18.56% | 16.00% | 1.15 | 16.40% | 4,101 | **$23,346** |
+| Random Forest | +80.61% | 12.60% | 19.31% | 0.71 | 20.39% | 3,873 | $18,061 |
+| Gradient Boosting | +94.84% | 14.33% | 17.43% | 0.86 | 19.96% | 7,136 | $19,484 |
+| Neural Network | +64.48% | 10.51% | 16.78% | 0.68 | 25.80% | 8,208 | $16,448 |
+| SPY buy-and-hold | +61.29% | — | — | — | — | — | — |
+
+**Outcome against the stated success criteria:**
+
+- The **$20,000 target was met** by Price AI at $20,145 and Combined AI at $23,346.
+- Combined AI is the strongest result: **+133.46%**, Sharpe 1.15 and 16.40% maximum drawdown.
+- No model achieved **two 100%+ validation folds**; the best single fold was +46.63%.
+- Price AI, Combined AI, Random Forest, Gradient Boosting and Neural Network beat SPY after costs.
+- Price AI, Combined AI, Random Forest and Gradient Boosting stayed below 25% maximum drawdown.
+- The ML baselines improved but still trailed Combined AI on risk-adjusted return; Gradient Boosting was the strongest ML model at +94.84%.
+
+Fold-by-fold returns show that the aggregate result is not a smooth path:
+
+| Model | 2021–22 | 2022–23 | 2023–24 | 2024–25 | 2025–26 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Price AI | +15.65% | +7.01% | +25.44% | −2.99% | +34.55% |
+| News AI | −17.31% | +3.02% | +5.57% | +9.36% | +24.17% |
+| Combined AI | +8.97% | +8.90% | +46.63% | +8.33% | +23.61% |
+| Random Forest | −5.27% | +10.10% | +32.12% | +24.30% | +6.05% |
+| Gradient Boosting | −3.03% | +3.98% | +32.76% | +23.87% | +19.53% |
+| Neural Network | −5.93% | +5.37% | +5.91% | +16.12% | +34.63% |
+| SPY buy-and-hold | −15.47% | +12.61% | +32.80% | +13.26% | +12.27% |
+
+The experiment also records bull/bear regime metrics. Combined AI's bull-regime subset returned +168.16% with Sharpe 1.95, while its bear-regime subset returned −12.94% with negative Sharpe. That is a useful warning: the headline result is not uniform across environments. Sector attribution is implemented in the live simulator (`/api/market/sectors`), but the offline experiment does not yet export per-sector returns, so no sector performance table is claimed here. Daily equity curves are also not exported; the result file contains final, fold and regime aggregates. Exporting the curves is a high-priority roadmap item.
+
+Full machine-readable output: [artifacts/experiments/results.json](artifacts/experiments/results.json). The detailed protocol and caveats are in [METHODOLOGY.md](METHODOLOGY.md).
+
+### Reproducibility
+
+The pipeline uses fixed seeds, deterministic feature construction, chronological splits, fixed model hyperparameters and fixed execution rules. The output records the data range, versions and fold boundaries. One full 10-year pass was completed. I have **not** run two complete passes to measure run-to-run variance, and Yahoo data can change between downloads. Reproducibility should therefore be treated as “deterministic given the same downloaded dataset,” not as a completed stability study.
+
+---
+
+## 9. Current limitations
+
+| Limitation | Impact |
+| --- | --- |
+| Survivorship bias | The universe contains current-listed survivors; historical failed/delisted companies are missing. |
+| Simulated historical news | Sentiment results are not validated against archived headlines. |
+| Correlated observations | 128 symbols are not 128 independent trials; statistical uncertainty is understated. |
+| Limited validated ML | Neural AI is live, but its validation rank IC is weak; the offline models remain research baselines. |
+| Five-year default window | It may not cover enough bull, bear, inflation and rate regimes. |
+| Cost model | 5 bps per side covers fees but not explicit spreads, market impact or capacity. |
+| Corporate actions | No dividend reinvestment or independent split normalization; returns are price returns. |
+| Fold target not reached | The aggregate $20,000 target was met, but no model achieved two 100%+ validation folds. |
+| Parameter selection | Entry, exit, position sizing and model feature/target choices were selected after inspecting the same five-year evaluation, so the headline is in-sample for those choices. |
+| Free hosting | Render can sleep, pausing replay/live background work; SQLite resets without a persistent disk. |
+| Deployment status | Commit `dd2d041` was pushed to `main`, but the configured Render service was still serving an older build when checked. |
+| Equity-curve export | The experiment JSON stores final, fold and regime aggregates, not the daily equity series, so full curves are not shown here. |
+| UI testing | The frontend has a production build check but no automated browser end-to-end suite. |
+| No authentication | Manual order/control endpoints are unauthenticated; this is a demo, not a multiuser service. |
+
+The project does **not** claim statistical significance merely because it has 160,640 daily observations. Those observations are overlapping, correlated and drawn from a survivor universe.
+
+---
+
+## 10. Deployment and infrastructure
+
+The repository includes `render.yaml` for two services:
+
+- **Backend:** Python web service rooted at `backend`; build `pip install -r requirements.txt`; start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`; health check `/api/health`.
+- **Frontend:** static service; build `cd frontend && npm ci && npm run build`; publish `frontend/dist`.
+
+The backend exposes REST under `/api/*`, WebSocket `/ws/market`, and OpenAPI documentation at `/docs`. The frontend uses `VITE_API_BASE` and `VITE_WS_URL` at build time. Backend configuration includes `MARKET_DATA_SOURCE`, `MARKET_HISTORY_RANGE`, `SIM_AUTOSTART`, `SIM_MODE`, `CORS_ORIGINS`, `DB_PATH`, `MODEL_DIR` and `ML_AUTOTRAIN`. Detailed endpoints and variables are in [docs/API.md](docs/API.md) and [TECHNICAL.md](TECHNICAL.md) rather than this report.
+
+SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios, positions, orders, trades, forecasts, snapshots, the simulation cursor and data-cache metadata. On a free Render filesystem the database is ephemeral; attach a disk and set `DB_PATH` for persistence.
+
+Free Render instances sleep after inactivity, stopping the clock and live polling. The backend self-pings `RENDER_EXTERNAL_URL/api/health` every minute while awake; the dashboard also sends a heartbeat, and a GitHub Actions workflow provides a fallback. These keepalive paths do not make the free service a production trading system.
+
+**Current deployment status:** the source is on `main` at `dd2d041`, but the Render backend still returned an older build (`history_range: "5y"`, 1,255 bars and `self_keepalive_seconds: 240`) when checked on 2026-11-14. The one-minute keepalive and the new experiment results are therefore not live yet. The configured backend URL is `https://sfbackend-9nsb.onrender.com`; it should not be treated as the latest release until a deployment is triggered and checked.
+
+---
+
+## 11. Testing and reliability
+
+Current backend status: **69 passing tests**.
+
+Coverage includes:
+
+| Area | Examples |
+| --- | --- |
+| Trading engine | Buys, sells, shorts, covers, average entry, fees, borrow, equity identity, rejection paths, next-bar fills |
+| Replay clock | Gating, pause/reset, decisions, pending fills, window completion, range persistence |
+| Market data | Yahoo parsing, calendar alignment, cache reuse, appends, synthetic fallback, retry behavior |
+| Live mode | Quote parsing, market-open detection, forming bars, live fills, mode switching |
+| API | Health, overview, forecasts, scorecard, leaderboard, orders, agent isolation, model status, WebSocket snapshot |
+| Forecasts | Expected-move bounds, top-five recording, ranking, per-share math, settlement |
+| Live neural model | Feature parity with training, cross-sectional percentile mapping |
+| Experiment | Fold construction, label purging, percentile scoring, deterministic trading, risk metrics |
+
+Regression behavior is exercised through the replay, API and forecast tests; there is no separate golden-file snapshot suite. The frontend has a TypeScript/Vite production-build check. It does not currently have an automated browser E2E suite, so the 69 backend tests should not be read as exhaustive coverage of the deployed UI.
+
+The most important test in this project is not a happy-path order test; it is the **purge test**. It verifies that no training row's five-session label can extend into the validation period. That is the boundary between a backtest and a leak.
+
+---
+
+## 12. Roadmap
+
+| Priority | Planned work |
+| --- | --- |
+| High | Independently re-run and validate the walk-forward experiment and accounting. |
+| High | Reduce survivorship bias with point-in-time constituents and delisted names. |
+| High | Export daily equity curves and add block-aware uncertainty estimates. |
+| High | Make deployment reproducible on `main` and verify the live build. |
+| Medium | Add real archived historical headlines. |
+| Medium | Add sequence models and validate feature/target choices across more seeds. |
+| Medium | Expand sector/regime analysis and portfolio-level risk controls. |
+| Later | Deep learning, reinforcement learning and advanced portfolio optimization. |
+| Later | Authentication and user-owned portfolios, if this becomes multiuser. |
+
+The priority is not “more models.” It is making the existing evaluation harder to fool: better constituents, better news data, better uncertainty, and a deployment path that a reviewer can reproduce.
+
+---
+
+## 13. Local development
 
 ```bash
+# Backend
+cd backend
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Frontend (second terminal)
 cd frontend
 npm ci
-VITE_API_BASE=https://your-backend.onrender.com \
-VITE_WS_URL=wss://your-backend.onrender.com/ws/market \
-npm run build
-```
+npm run dev
 
-Publish **the contents of `frontend/dist`**, not the source folder:
-
-```text
-index.html
-assets/index-*.js
-assets/index-*.css
-favicon.svg
-```
-
-Host settings:
-
-- Build command: `npm ci && npm run build`
-- Publish directory: `dist`
-- SPA rewrite: all paths to `/index.html`
-
-If the site shows a black screen, check the served `index.html`. If it contains
-`<script type="module" src="/src/main.tsx">`, the source folder was uploaded
-instead of the built `dist`. A static host cannot compile `/src/main.tsx`; upload
-the built files so `index.html` references `/assets/index-*.js`.
-
-`VITE_API_BASE` and `VITE_WS_URL` are baked into the bundle. If the backend
-origin changes, rebuild the static site.
-
-### CORS and WebSockets
-
-- The backend allows only the exact origins in `CORS_ORIGINS`.
-- WebSockets are not subject to browser CORS, but the `wss://` URL must reach
-  the backend.
-- A preflight failing with 400 usually means the origin is not listed.
-- Restart the backend after changing `CORS_ORIGINS`.
-
----
-
-## 15. Tests
-
-Run:
-
-```bash
-cd backend
-. .venv/bin/activate
-python -m pytest -q
-```
-
-Test files cover:
-
-| File | Focus |
-| --- | --- |
-| `test_trading_engine.py` | Buys, sells, shorts, covers, average entry, fees, borrow, equity identity, rejection paths and next-bar fills. |
-| `test_replay.py` | Clock gating, pause/reset, decisions, pending fills, session borrow accrual and completion. |
-| `test_market_data.py` | Yahoo parsing, calendar alignment, cache reuse, append refresh, synthetic fallback and retry behavior. |
-| `test_live_mode.py` | Live quote parsing, market-open detection, forming bars, live fills and mode switching. |
-| `test_api.py` | Health, overview, forecast refresh/scorecard, leaderboard, manual orders, agent isolation and WebSocket payloads. |
-| `test_forecasts.py` | Expected-move direction/bounds, top-five recording, rank order, per-share math, manual refresh, settlement and scorecard wiring. |
-| `test_yahoo_http.py` | Retryable statuses, backoff, `Retry-After` and attempt limits. |
-| `test_experiment.py` | Walk-forward fold construction, label purging, percentile scoring, deterministic trading and risk metrics. |
-
-Current status: **64 passed**.
-
-### Strategy research
-
-The fast backtester and logistic trainer need no extra dependencies:
-
-```bash
-cd backend
-. .venv/bin/activate
-python -m tools.backtest --range 10y
-python -m tools.train_price_news --range 10y --split 0.6
-```
-
-The backtest loads one aligned Yahoo history, generates the same deterministic
-headlines as the simulator, and runs long-only strategies with next-open fills
-and 5 bps fees. It is much faster than replaying through SQLite and is intended
-for parameter sweeps.
-
-The trainer builds price and news features, labels each row by the five-session
-forward direction, standardizes on the training window only, and fits a
-logistic model. It is a research baseline, not a live agent.
-
-### Walk-forward ML experiment
-
-The full six-model experiment needs the experimental dependencies (kept out of
-the production image):
-
-```bash
+# Offline experiment (optional, extra dependencies)
 cd backend
 . .venv/bin/activate
 pip install -r requirements-experiments.txt
 python -m tools.experiment --range 10y --output ../artifacts/experiments/results.json
 ```
 
-It compares the three existing strategies with a random forest, gradient
-boosting and a multilayer perceptron. Every model gets the same rule: rank its
-scores cross-sectionally each session, enter the top five above the 80th
-percentile, exit below the 55th percentile, hold at most five names at 18% of
-starting equity, fill at the next open, and pay 5 bps per side.
-
-The evaluation is five chronological unseen years (2021-11-15 to 2026-11-13).
-Training starts with all earlier data and expands after each validation year. A
-training row is purged when its five-session label would finish inside the
-validation period, so features and labels cannot leak the validation future.
-Features are computed only from bars, volume and headlines at or before the
-scoring close.
-
-Latest run (after costs):
-
-| Model | Total return | CAGR | Sharpe | Max drawdown | Final equity |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Price AI | +98.50% | 14.76% | 0.86 | 18.24% | $19,850 |
-| News AI | +2.75% | 0.55% | 0.11 | 33.81% | $10,275 |
-| Combined AI | +95.24% | 14.38% | 0.89 | 24.12% | $19,524 |
-| Random Forest | +72.34% | 11.55% | 0.59 | 31.60% | $17,234 |
-| Gradient Boosting | +69.20% | 11.14% | 0.61 | 29.83% | $16,920 |
-| Neural Network | +20.30% | 3.78% | 0.28 | 37.89% | $12,030 |
-| SPY buy-and-hold | +61.29% | — | — | — | — |
-
-The $20,000 target and the two-100%-fold criterion were **not met**. Price and
-Combined beat SPY after costs and stayed under 25% drawdown; the ML baselines
-did not. No validation period reached a 100% return. Results are saved in
-`artifacts/experiments/results.json` with fold-by-fold, regime-by-regime,
-turnover and risk details. This is an offline research pipeline, not live model
-weights; the live competition still uses the transparent heuristics.
+The detailed environment variables, screen behavior and database schema are in [TECHNICAL.md](TECHNICAL.md). The API surface is summarized in [docs/API.md](docs/API.md).
 
 ---
 
-## 16. Troubleshooting
+## 14. Links and references
 
-### The page is black
+- [Source repository](https://github.com/phantasmthenoob-tech/sfb)
+- Live demo: not linked while the latest Render build is unverified; the backend health endpoint is below
+- [Technical reference](TECHNICAL.md)
+- [Evaluation methodology](METHODOLOGY.md)
+- [API reference](docs/API.md)
+- [Build journal](docs/BUILD_JOURNAL.md)
+- [Walk-forward results](artifacts/experiments/results.json)
+- Backend health endpoint: `https://sfbackend-9nsb.onrender.com/api/health`
+- Data provider: [Yahoo Finance](https://finance.yahoo.com)
+- FastAPI/OpenAPI docs: `/docs` on a running backend
+- Questions or review comments: open an issue on the repository
 
-The static host is serving the Vite source `index.html` with
-`/src/main.tsx`. Upload the built `dist` contents, not the `frontend/` source
-folder. The built `index.html` must reference hashed files under `/assets/`.
+Methodology references: Sharpe (1966), *Mutual Fund Performance*, DOI [10.1086/294846](https://doi.org/10.1086/294846); Bailey et al. (2014), “Pseudo-Mathematics and Financial Charlatanism,” [Notices of the AMS](https://www.ams.org/notices/201405/rnoti-p458.pdf); López de Prado (2018), *Advances in Financial Machine Learning* (purging and embargo).
 
-### “Cannot reach the backend”
-
-- Confirm the backend URL and that `/api/health` returns 200.
-- Check `VITE_API_BASE`; it is build-time, so rebuild after changing it.
-- Check the browser console for CORS errors.
-- On Render, a free instance may be cold-starting; wait for the health check.
-
-### CORS error / preflight 400
-
-Add the exact static-site origin to `CORS_ORIGINS`:
-
-```text
-https://your-site.example
-```
-
-Include the scheme, no path, no trailing slash. Restart the backend.
-
-### Forecasts are empty
-
-- The replay is paused at the beginning or has not run enough bars.
-- Agents need 20 closes (and enough news history) to produce signals.
-- In live mode, no calls are recorded while the market is closed; calls refresh
-  on the live decision cadence while it is open.
-- Switching mode or Reset clears forecasts.
-
-### Live mode says “market closed”
-
-This is expected on weekends, holidays and outside 09:30–16:00 New York time.
-Prices are last known prints. Manual orders queue; no live fills or decisions
-occur until the market reopens.
-
-### Orders stay pending
-
-Replay orders fill at the next bar's open, so press **Start**/wait for a tick.
-Live orders fill on the next poll while the market is open. After the replay is
-complete, reset or restart.
-
-### Data says “Sample data”
-
-Yahoo was unavailable on a cold start or `MARKET_DATA_SOURCE=synthetic` is set.
-The simulator is running on deterministic offline prices, not real market data.
-
-### Render build fails on `pydantic-core`
-
-Set `PYTHON_VERSION=3.12.3`. The pinned backend dependencies need wheels that are
-not available for newer Python versions on the default build image.
-
-### SQLite data disappears after redeploy
-
-Render's free filesystem is ephemeral. Attach a disk and set `DB_PATH` to a file
-on that disk.
-
----
-
-## 17. Deliberate limitations
-
-- No authentication, user accounts or per-user permissions.
-- The manual order endpoint is unauthenticated; treat public deployments as
-  demos.
-- No real news feed; all headlines and sentiment are simulated. The offline
-  logistic trainer and ML experiment are research baselines and are not loaded
-  into the live competition.
-- The 120-stock universe is current-listed names, not point-in-time historical
-  constituents. Delisted and acquired companies are not yet included, so
-  survivorship bias remains in both the simulator and the experiment.
-- The ML experiment uses 5 bps per side and next-open fills; it does not model a
-  separate bid/ask spread, market impact, borrow availability or capacity.
-- No confidence-calibration curve or statistical-significance testing yet.
-  Walk-forward folds are chronological but not block-bootstrapped.
-- Sector attribution is not a full factor model; it groups positions by the
-  stock's primary industry sector.
-- No partial fills, limit orders, stop orders, cancellation UI or margin calls.
-- No dividends or corporate-action adjustments beyond Yahoo's raw series.
-- No intraday replay chart; replay is daily closes.
-- The Markets chart has no zoom or candlesticks; the replay range selector is in the header.
-- Live mode polls once a minute, not streaming tick-by-tick.
-- No browser routing/deep links for tabs.
-- No dark-mode switch, translations, analytics or social metadata.
-- The SPX/IXIC values are synthetic indices derived from the universe; they are
-  not real index quotes.
-- Activity history is limited to the latest 12 rows in the UI (more through the
-  API).
-- Equity snapshots are taken per replay bar/live session update, not per trade.
-
----
-
-## 18. Glossary
-
-| Term | Meaning |
-| --- | --- |
-| **Bar** | One replay trading session (daily OHLCV) or one forming live session update. |
-| **Cursor** | Index of the currently visible bar. All queries are gated by it. |
-| **Signal** | An agent's score/confidence/rationale for a ticker. |
-| **Intent** | An agent's requested order before validation. |
-| **Order** | A queued request; may be pending/filled/rejected/cancelled. |
-| **Trade** | An immutable fill created by the exchange. |
-| **Fill price** | Price used when an order executes: next replay open or next live quote. |
-| **Long** | Positive position; profits when price rises. |
-| **Short** | Negative position; profits when price falls. |
-| **Cover** | Buy back shares to reduce a short. |
-| **Equity** | Cash plus mark-to-market position value. |
-| **Drawdown** | Decline from a previous equity peak. |
-| **Expected move** | Model estimate of the next five sessions' percentage move. |
-| **Forecast batch** | The top five calls an agent records for one decision/bar. |
-| **Replay** | Historical daily-bar simulation. |
-| **Live** | Real-quote simulation during the US session. |
-| **Forming bar** | Today's still-changing live OHLCV bar. |
-| **Basis point (bp)** | 1/100th of a percent; 5 bps = 0.05%. |
+**Not an investment platform.** No live brokerage connection, no real money and no guarantee that historical results generalize.

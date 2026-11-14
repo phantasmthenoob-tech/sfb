@@ -7,7 +7,9 @@ import pytest
 
 from tools.experiment import (
     HORIZON,
+    Sample,
     _percentile_scores,
+    _rank_targets,
     _risk_metrics,
     build_feature_rows,
     build_folds,
@@ -40,6 +42,22 @@ def bars_for(dates: list[str], tickers=("AAPL", "MSFT", "SPY")) -> dict[str, dic
                 "volume": 1_000_000 + offset * 1000,
             }
     return bars
+
+
+def test_rank_targets_order_within_each_session():
+    rows = [
+        Sample(1, "A", (0.0,), -0.03, 0.0, 0.0, 0.0),
+        Sample(1, "B", (0.0,), 0.02, 0.0, 0.0, 0.0),
+        Sample(1, "C", (0.0,), 0.01, 0.0, 0.0, 0.0),
+        Sample(2, "A", (0.0,), 0.05, 0.0, 0.0, 0.0),
+        Sample(2, "B", (0.0,), -0.01, 0.0, 0.0, 0.0),
+    ]
+    targets = _rank_targets(rows)
+    assert targets[0] == -0.5
+    assert targets[2] == 0.0
+    assert targets[1] == 0.5
+    assert targets[3] == 0.5
+    assert targets[4] == -0.5
 
 
 def test_training_rows_purge_the_validation_period():

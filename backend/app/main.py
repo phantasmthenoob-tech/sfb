@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import agents, market, orders, portfolios, simulation
+from .api import agents, market, models, orders, portfolios, simulation
 from .config import Settings
 from .database.database import Database
 from .database.repositories import Repository
@@ -45,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.repo = repo
         app.state.events = events
         app.state.engine = engine
+        app.state.models = engine.models
         app.state.settings = settings
 
         engine._task = asyncio.create_task(engine.run_loop())
@@ -63,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="AI Market Simulator",
         description=(
-            "Paper-trading replay where three independent AI portfolios and one manual "
+            "Paper-trading replay where four independent AI portfolios and one manual "
             "portfolio compete on identical starting capital."
         ),
         version="0.1.0",
@@ -83,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(portfolios.router)
     app.include_router(orders.router)
     app.include_router(simulation.router)
+    app.include_router(models.router)
 
     @app.get("/api/health", tags=["system"])
     def health() -> dict:

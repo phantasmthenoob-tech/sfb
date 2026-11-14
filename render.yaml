@@ -30,7 +30,7 @@ services:
         value: "300"
       # The backend pings RENDER_EXTERNAL_URL/api/health while awake.
       - key: SELF_KEEPALIVE_SECONDS
-        value: "240"
+        value: "60"
       # Comma-separated exact browser origins, e.g.
       # https://my-dashboard.onrender.com,https://preview.example.com
       # Set this in the Render dashboard after the static site URL is known.

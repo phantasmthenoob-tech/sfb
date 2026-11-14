@@ -9,6 +9,7 @@ import time
 import urllib.request
 from datetime import date, datetime, timezone
 
+from ..ai.model_registry import ModelRegistry
 from ..competition.leaderboard import build_leaderboard, build_portfolio_view
 from ..competition.manager import CompetitionManager
 from ..config import FORECAST_HORIZON_SESSIONS, SPEED_OPTIONS, Settings
@@ -44,7 +45,10 @@ class SimulationEngine:
         self.events = events
         self.exchange = Exchange(repo, settings)
         self.order_manager = OrderManager(repo, self.exchange, settings)
-        self.competition = CompetitionManager(repo, settings, self.order_manager)
+        self.models = ModelRegistry(repo, settings)
+        self.competition = CompetitionManager(
+            repo, settings, self.order_manager, models=self.models
+        )
 
         self.timeline: list[dict] = []
         self.total_bars = 0
@@ -108,6 +112,7 @@ class SimulationEngine:
 
         now = datetime.now(timezone.utc).isoformat()
         self.repo.seed_accounts(self.settings, now)
+        self.models.load()
         self.competition.load_agents()
 
         run = self.repo.get_simulation()
@@ -132,6 +137,7 @@ class SimulationEngine:
             self.last_prices = self.repo.prices_at(self.cursor)
             self._take_snapshots(self.timeline[self.cursor]["ts"])
             self.settle_forecasts()
+            self._maybe_autotrain()
             self._persist()
             return
 
@@ -147,6 +153,24 @@ class SimulationEngine:
         if manual and not self.repo.latest_snapshot(manual["id"]):
             self._take_snapshots(self.timeline[self.cursor]["ts"])
         self.settle_forecasts()
+        self._maybe_autotrain()
+
+    def _maybe_autotrain(self) -> None:
+        """Train once on history visible at the current cursor.
+
+        A short replay window can start with years of prior bars, so the model
+        can be trained as of the window start and used for the unseen remainder.
+        The full-history replay starts at bar 0 and therefore waits for an
+        explicit retrain; training there would either use future bars or fail.
+        """
+        if (
+            not self.settings.ml_autotrain
+            or self.settings.data_source == "synthetic"
+            or self.models.status()["ready"]
+            or self.cursor < 60
+        ):
+            return
+        self.models.start_training(self.cursor)
 
     def _cache_covers_universe(self, cache: dict | None) -> bool:
         """Whether a cache was built for every ticker currently configured."""
@@ -416,6 +440,7 @@ class SimulationEngine:
         self.status = STATUS_PAUSED if self.mode == MODE_REPLAY else STATUS_RUNNING
         self.last_prices = self.repo.prices_at(self.cursor)
         self._take_snapshots(self.timeline[self.cursor]["ts"])
+        self._maybe_autotrain()
         self._persist()
         self._publish()
         return self.status_payload()
@@ -462,6 +487,7 @@ class SimulationEngine:
                 self.live_tick()
             except Exception:  # pragma: no cover - network failures are non-fatal
                 logger.warning("Initial live poll failed", exc_info=True)
+            self._maybe_autotrain()
 
         self._persist()
         self._publish()
@@ -494,6 +520,7 @@ class SimulationEngine:
         self.status = STATUS_PAUSED
         self.last_prices = self.repo.prices_at(self.cursor)
         self._take_snapshots(self.timeline[self.cursor]["ts"])
+        self._maybe_autotrain()
         self._persist()
         self._publish()
         return self.status_payload()
@@ -816,8 +843,9 @@ class SimulationEngine:
             "range_bars": range_bars,
             "range_options": range_options(),
             "decision_every_bars": self.settings.agent_decision_every,
-            "autostart": self.settings.autostart,
-        }
+                            "autostart": self.settings.autostart,
+                "models": self.models.status(),
+            }
         if self.mode == MODE_LIVE:
             elapsed = time.monotonic() - self._last_live_poll
             payload["live"] = {

@@ -1,7 +1,7 @@
 export type SimulationStatus = "running" | "paused" | "completed";
 export type SimulationMode = "replay" | "live";
 export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
-export type Tab = "forecasts" | "leaderboard" | "markets" | "trading" | "activity";
+export type Tab = "forecasts" | "leaderboard" | "markets" | "trading" | "activity" | "models";
 
 export interface LiveState {
   market_open: boolean;
@@ -42,6 +42,7 @@ export interface SimulationState {
   range_end_bar?: number;
   range_bars?: number;
   range_options?: ReplayRangeOption[];
+  models?: ModelStatus;
 }
 
 export interface Quote {
@@ -238,6 +239,30 @@ export interface CorrelationSummary {
   top_pairs: { left: string; right: string; correlation: number }[];
   bottom_pairs: { left: string; right: string; correlation: number }[];
   note: string;
+}
+
+export interface ModelValidation {
+  days?: number;
+  rank_ic?: number | null;
+  rank_ic_std?: number;
+  top10_excess_bps?: number | null;
+}
+
+export interface ModelStatus {
+  model: string;
+  state: "untrained" | "training" | "ready" | "error";
+  ready: boolean;
+  trained_at: string | null;
+  samples: number;
+  features: number;
+  train_samples: number;
+  validation_samples: number;
+  validation: ModelValidation;
+  data_start: string | null;
+  data_end: string | null;
+  trained_through_bar: number | null;
+  error: string | null;
+  artifact: string;
 }
 
 export interface Snapshot {

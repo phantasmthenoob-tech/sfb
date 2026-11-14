@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from ..ai.base_agent import BaseAgent, MarketContext, OrderIntent
 from ..ai.combined_agent import CombinedAgent
 from ..ai.features import sentiment_scores
+from ..ai.neural_agent import NeuralAgent
 from ..ai.news_agent import NewsAgent
 from ..ai.price_agent import PriceAgent
 from ..config import Settings
@@ -21,14 +22,22 @@ AGENT_CLASSES = {
     "price": PriceAgent,
     "news": NewsAgent,
     "combined": CombinedAgent,
+    "neural": NeuralAgent,
 }
 
 
 class CompetitionManager:
-    def __init__(self, repo: Repository, settings: Settings, order_manager: OrderManager) -> None:
+    def __init__(
+        self,
+        repo: Repository,
+        settings: Settings,
+        order_manager: OrderManager,
+        models: object | None = None,
+    ) -> None:
         self.repo = repo
         self.settings = settings
         self.order_manager = order_manager
+        self.models = models
         self.agents: list[BaseAgent] = []
         self._history: dict[str, deque] = {}
         self._history_cursor = -1
@@ -50,6 +59,7 @@ class CompetitionManager:
                     portfolio_id=portfolio["id"],
                     repo=self.repo,
                     settings=self.settings,
+                    models=self.models,
                 )
             )
         self.agents = agents
@@ -92,6 +102,7 @@ class CompetitionManager:
         self, *, bar_index: int, sim_time: str, prices: dict[str, float]
     ) -> MarketContext:
         bars = self._bars_for_context(bar_index)
+        market_bars = self.repo.bars_for("SPY", up_to=bar_index, limit=120)
         news = list(reversed(self.repo.news_up_to(bar_index, limit=4000)))
         sentiments = sentiment_scores(
             news, self.settings.stock_universe, max(0, bar_index - 5)
@@ -103,6 +114,7 @@ class CompetitionManager:
             bars=bars,
             news=news,
             sentiments=sentiments,
+            market_bars=market_bars,
         )
 
     def run_forecasts(

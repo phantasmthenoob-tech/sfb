@@ -1,4 +1,13 @@
-const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+// The static dashboard has no backend of its own. If the build environment does
+// not provide VITE_API_BASE, production falls back to the deployed API so a
+// plain `npm run build` still produces a working site. Local development keeps
+// using Vite's same-origin proxy.
+const PRODUCTION_API_BASE = "https://sfbackend-9nsb.onrender.com";
+const configuredBase = (import.meta.env.VITE_API_BASE ?? "").trim();
+const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+const API_BASE = (
+  configuredBase || (import.meta.env.PROD && !isLoopback ? PRODUCTION_API_BASE : "")
+).replace(/\/$/, "");
 
 export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;

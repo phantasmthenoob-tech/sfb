@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from app.competition.leaderboard import build_leaderboard
+from app.config import Settings
 from app.database.database import Database
 from app.database.repositories import Repository
 from app.services.simulation_clock import SimulationEngine
@@ -21,6 +22,11 @@ def engine(tmp_path):
     yield sim
     sim.shutdown()
     db.close()
+
+
+def test_self_keepalive_defaults_to_one_minute(monkeypatch):
+    monkeypatch.delenv("SELF_KEEPALIVE_SECONDS", raising=False)
+    assert Settings().self_keepalive_seconds == 60
 
 
 def test_self_keepalive_url_resolution(engine, monkeypatch):
@@ -132,6 +138,7 @@ def test_agents_compete_with_identical_starting_capital(tmp_path):
     assert strategies["price"].entry_threshold == pytest.approx(0.45)
     assert strategies["news"].entry_threshold == pytest.approx(0.35)
     assert strategies["combined"].entry_threshold == pytest.approx(0.45)
+    assert strategies["neural"].max_entries == 10
     assert not any(agent.allow_short for agent in strategies.values())
     assert len(settings.stock_universe) == 120
     assert "SPY" in settings.etf_universe
@@ -142,12 +149,18 @@ def test_agents_compete_with_identical_starting_capital(tmp_path):
     assert engine.status == "completed"
 
     leaderboard = build_leaderboard(repo, engine.last_prices)
-    assert len(leaderboard) == 4  # three AI agents plus the manual portfolio
+    assert len(leaderboard) == 5  # four AI agents plus the manual portfolio
     agent_rows = [row for row in leaderboard if row["kind"] == "agent"]
-    assert {row["model_type"] for row in agent_rows} == {"price", "news", "combined"}
+    assert {row["model_type"] for row in agent_rows} == {
+        "price",
+        "news",
+        "combined",
+        "neural",
+    }
     for row in agent_rows:
         assert row["starting_balance"] == pytest.approx(10000.0)
-        assert row["total_trades"] > 0, f"{row['name']} never traded"
+        if row["model_type"] != "neural":
+            assert row["total_trades"] > 0, f"{row['name']} never traded"
         assert row["max_drawdown_pct"] >= 0
     # Rankings are ordered by total return.
     returns = [row["total_return_pct"] for row in leaderboard]

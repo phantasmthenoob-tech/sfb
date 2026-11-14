@@ -26,6 +26,7 @@ class MarketContext:
     bars: dict[str, list[dict]]
     news: list[dict]
     sentiments: dict[str, dict] = field(default_factory=dict)
+    market_bars: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class BaseAgent(ABC):
     target_position_pct: float = 0.15
     target_short_pct: float = 0.10
     allow_short: bool = True
+    models: object | None = field(default=None, repr=False)
     _last_scores: dict[str, float] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:

@@ -15,32 +15,52 @@ class Repository:
 
     # ------------------------------------------------------------------ setup
     def seed_accounts(self, settings: Settings, now: str) -> None:
-        existing = self.db.query_one("SELECT COUNT(*) AS n FROM portfolios")
-        if existing and existing["n"]:
-            return
-
+        """Create missing competition accounts without disturbing existing ones."""
         agents = [
             ("Price AI", "price", "Technical signals from historical prices, volume and momentum."),
             ("News AI", "news", "Sentiment signals derived from financial headlines."),
             ("Combined AI", "combined", "Blends price momentum with news sentiment."),
+            (
+                "Neural AI",
+                "neural",
+                "Walk-forward neural-network ranking model trained from recorded history.",
+            ),
         ]
         with self.db.transaction() as conn:
             for name, model_type, description in agents:
-                conn.execute(
-                    "INSERT INTO agents (name, model_type, description, created_at) VALUES (?, ?, ?, ?)",
-                    (name, model_type, description, now),
-                )
-                agent_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+                existing_agent = conn.execute(
+                    "SELECT id FROM agents WHERE name = ?", (name,)
+                ).fetchone()
+                if existing_agent is None:
+                    conn.execute(
+                        "INSERT INTO agents (name, model_type, description, created_at) VALUES (?, ?, ?, ?)",
+                        (name, model_type, description, now),
+                    )
+                    agent_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+                else:
+                    agent_id = int(existing_agent["id"])
+                    conn.execute(
+                        "UPDATE agents SET model_type = ?, description = ? WHERE id = ?",
+                        (model_type, description, agent_id),
+                    )
+                portfolio = conn.execute(
+                    "SELECT id FROM portfolios WHERE agent_id = ?", (agent_id,)
+                ).fetchone()
+                if portfolio is None:
+                    conn.execute(
+                        "INSERT INTO portfolios (agent_id, name, kind, starting_balance, cash, created_at)"
+                        " VALUES (?, ?, 'agent', ?, ?, ?)",
+                        (agent_id, name, settings.starting_balance, settings.starting_balance, now),
+                    )
+            manual = conn.execute(
+                "SELECT id FROM portfolios WHERE kind = 'manual' LIMIT 1"
+            ).fetchone()
+            if manual is None:
                 conn.execute(
                     "INSERT INTO portfolios (agent_id, name, kind, starting_balance, cash, created_at)"
-                    " VALUES (?, ?, 'agent', ?, ?, ?)",
-                    (agent_id, name, settings.starting_balance, settings.starting_balance, now),
+                    " VALUES (NULL, 'Your portfolio', 'manual', ?, ?, ?)",
+                    (settings.starting_balance, settings.starting_balance, now),
                 )
-            conn.execute(
-                "INSERT INTO portfolios (agent_id, name, kind, starting_balance, cash, created_at)"
-                " VALUES (NULL, 'Your portfolio', 'manual', ?, ?, ?)",
-                (settings.starting_balance, settings.starting_balance, now),
-            )
 
     def get_simulation(self) -> dict | None:
         return self.db.query_one("SELECT * FROM simulation_runs WHERE id = 1")
@@ -773,6 +793,18 @@ class Repository:
     def last_bar_index(self) -> int:
         row = self.db.query_one("SELECT COALESCE(MAX(bar_index), -1) AS idx FROM market_data")
         return int(row["idx"]) if row else -1
+
+    def all_bars(self) -> list[dict]:
+        return self.db.query(
+            "SELECT ticker, session_date, bar_index, open, high, low, close, volume"
+            " FROM market_data ORDER BY bar_index, ticker"
+        )
+
+    def all_news(self) -> list[dict]:
+        return self.db.query(
+            "SELECT ticker, headline, source, sentiment, ts, bar_index"
+            " FROM news ORDER BY bar_index, id"
+        )
 
     def bars_at(self, bar_index: int) -> list[dict]:
         return self.db.query(

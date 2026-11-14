@@ -1,0 +1,2 @@
+b50fa132d82d2840790ffd658e51f3659c83b7dae295ce5cf3d4f05cc88f39f5  sfb-backend-deploy.zip
+986974b4b38a99d3f91f4353cb6624ad1cdd3777a65c0b400f7d46b13da25651  sfb-frontend-deploy.zip

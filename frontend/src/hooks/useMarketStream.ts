@@ -108,12 +108,13 @@ export function useMarketStream() {
       if (!disposed) {
         void apiGet<{ status: string }>("/api/health").catch(() => undefined);
       }
-    }, 4 * 60 * 1000);
+    }, 60 * 1000);
 
     return () => {
       disposed = true;
       window.clearTimeout(retryTimer);
       window.clearInterval(poll);
+      window.clearInterval(keepAlive);
       window.clearInterval(keepAlive);
       socket?.close();
     };

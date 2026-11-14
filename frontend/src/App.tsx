@@ -4,6 +4,7 @@ import { Activity } from "./components/Activity";
 import { Forecasts } from "./components/Forecasts";
 import { Header } from "./components/Header";
 import { Markets } from "./components/Markets";
+import { Models } from "./components/Models";
 import { Overview } from "./components/Overview";
 import { Trading } from "./components/Trading";
 import { Loading } from "./components/ui";
@@ -14,6 +15,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "forecasts", label: "Forecasts" },
   { id: "leaderboard", label: "Leaderboard" },
   { id: "markets", label: "Markets" },
+  { id: "models", label: "Models" },
   { id: "trading", label: "Trading" },
   { id: "activity", label: "Activity" },
 ];
@@ -78,6 +80,8 @@ export default function App() {
           <Overview snapshot={snapshot} />
         ) : tab === "markets" ? (
           <Markets snapshot={snapshot} />
+        ) : tab === "models" ? (
+          <Models />
         ) : tab === "trading" ? (
           <Trading snapshot={snapshot} onRefresh={refresh} />
         ) : (

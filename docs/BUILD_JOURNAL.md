@@ -2783,7 +2783,7 @@ was live only when someone was watching.
 ### Evening: two wake-up paths
 
 I added a small frontend heartbeat. While the dashboard is open, the stream hook
-calls `/api/health` every four minutes. It is not a data refresh; the WebSocket
+calls `/api/health` every minute. It is not a data refresh; the WebSocket
 still carries snapshots. It is a deliberate request to keep the instance from
 idling out.
 
@@ -3060,3 +3060,173 @@ receipts.
 | Slow cold start | Health check delayed | First Yahoo download | SQLite cache, fewer refreshes |
 | Forecast confusion | `-6%` read as a loss | Direction/label ambiguity | Rise/drop labels, short note, disclaimer |
 | Hidden socket failure | Page looks alive but is polling | Fallback masks dead stream | Connection indicator and monitoring |
+
+---
+
+## Appendix: implementation turn log (factual)
+
+> Unlike the composite diary above, this appendix is a factual work log for the
+> implementation turns in the current chat. It records the request, the code
+> change, the verification, and any unresolved deployment or data limitation.
+> Dates are intentionally omitted here so the factual log does not pretend to be
+> part of the fictional 11/09/26–01/08/27 narrative.
+
+### Turn 1 — Improve the one-year replay and collect more data
+
+**Request:** The one-year replay lost money for every model except Price AI, and
+Price AI had only a small gain. Improve returns and use more data.
+
+**Work:** Added the forecast settlement path and scorecard, expanded the initial
+universe, and made the data/research loop practical. The live agents remained
+long-only and used the existing technical and headline signals rather than a
+black-box model.
+
+**Verification:** The 20-symbol replay produced positive returns in the longer
+windows: Price AI `+55.30%`, News AI `+38.16%`, Combined AI `+55.39%` on five
+years. The backend suite was green at **55 passed** after the universe and
+forecast changes.
+
+**Decision:** More history helped, but the one-year window was still noisy. The
+next step was to separate model research from the live competition instead of
+loading every promising experiment into the simulator.
+
+### Turn 2 — Train the model further and optimize gains
+
+**Request:** Train the model further, use as much price/news data as possible,
+and keep improving returns.
+
+**Work:** Added offline research tooling for fast backtests and a walk-forward
+logistic price/news model. The trainer used only training-window scaling and
+chronological validation.
+
+**Verification:** The logistic baseline reached about **53.04%** walk-forward
+direction accuracy. Its held-out return was about **+94.2%**, below the Combined
+AI heuristic at **+106.1%** on the same research path.
+
+**Decision:** Do not deploy the logistic weights. Keep the transparent heuristics
+in the live competition and document the ML result as a baseline. This prevented
+a lower-performing, harder-to-explain model from replacing the existing agents.
+
+### Turn 3 — Expand the universe, sectors, ETFs and correlations
+
+**Request:** Expand to as many tickers as practical; use industry sectors and
+non-exclusive exposure tags; keep ETFs separate; avoid a “political” sector;
+track correlations; make classification part of the simulator.
+
+**Work:** Added `backend/app/market/universe.py` with **120 stocks**, **8 ETFs**,
+**13 industry sectors**, and **8 exposure tags**. ETFs became benchmark-only and
+were excluded from agent trading. Added sector attribution, correlation
+diagnostics, metadata APIs, the sector UI, stock/ETF filtering, and the expanded
+5-year default.
+
+**Verification:** A full 5-year, 128-symbol run produced Combined AI `+89.67%`,
+News AI `+38.90%`, and Price AI `+36.84%`, with **zero ETF trades** and average
+pairwise correlation **0.1649**. The backend reached **56 passed** tests and the
+frontend built successfully.
+
+**Limitation:** The 120 names are current-listed survivors. No point-in-time
+constituent or delisted-security dataset was available, so survivorship bias
+remains documented rather than solved.
+
+### Turn 4 — Record prices continuously and add replay date windows
+
+**Request:** Keep recording price/data while the site runs so replay can select
+last week, last month, year-to-date, last year, five years, and similar windows.
+
+**Work:** Added persistent replay presets (`1w`, `1m`, `3m`, `ytd`, `1y`, `5y`,
+`all`) stored in `simulation_runs`. The engine now starts, resets, completes and
+reports progress against the selected window. Added `POST
+/api/simulation/range`, range fields in status payloads, recording metadata in
+the data payload, header range controls, and window-aware chart history.
+
+**Verification:** On the real 5-year dataset the presets resolved to 6, 23, 65,
+219, 252, 1,255 and 1,255 sessions respectively. The recording payload reported
+**160,640 bars**, **1,255 sessions**, **128 tickers**, through **2026-11-13**.
+A one-week replay completed at its window end. The backend reached **59 passed**
+tests.
+
+**Limitation:** Recording is daily-bar based. Live polls update the current
+forming daily bar; the app does not store every intraday tick.
+
+### Turn 5 — Build the six-model walk-forward experiment
+
+**Request:** Compare Price AI, News AI, Combined AI, Random Forest, Gradient
+Boosting and Neural Network with chronological walk-forward validation, identical
+costs and constraints, regime/risk metrics, and a $10,000-to-$20,000 target.
+
+**Work:** Added `backend/tools/experiment.py`, a separate
+`requirements-experiments.txt`, and leakage/metric tests. The experiment uses 10
+years of data, five expanding-window folds, a five-session label horizon, and a
+purge that excludes any training label ending inside the validation period.
+Every model uses the identical top-five percentile rule, next-open fills, and
+5 bps per side.
+
+**Verification:** The run covered **2,514 sessions**, **316,738 feature rows**
+and **645,952 simulated headlines**. Results after costs:
+
+| Model | Return | Final equity | Sharpe | Max drawdown |
+| --- | ---: | ---: | ---: | ---: |
+| Price AI | +98.50% | $19,850 | 0.86 | 18.24% |
+| News AI | +2.75% | $10,275 | 0.11 | 33.81% |
+| Combined AI | +95.24% | $19,524 | 0.89 | 24.12% |
+| Random Forest | +72.34% | $17,234 | 0.59 | 31.60% |
+| Gradient Boosting | +69.20% | $16,920 | 0.61 | 29.83% |
+| Neural Network | +20.30% | $12,030 | 0.28 | 37.89% |
+| SPY benchmark | +61.29% | — | — | — |
+
+The **$20,000 target was not met**; no model had two 100%+ validation folds.
+Price AI and Combined AI beat SPY after costs and stayed below 25% drawdown. The
+full JSON includes fold, regime, turnover and cost details. Backend tests reached
+**64 passed**.
+
+**Limitation:** The experiment uses simulated historical headlines, current
+constituents, and a 5 bps cost model without explicit spread, impact or capacity.
+One full end-to-end pass was run; deterministic seeds and deterministic unit
+tests are in place, but run-to-run variance was not measured with two full
+passes.
+
+### Turn 6 — Commit and deploy main
+
+**Request:** Commit and deploy `main`.
+
+**Work:** Reviewed and staged the source, documentation, tests and experiment
+result; committed as `dd2d041` (“Expand the simulator with replay ranges and
+walk-forward experiments”) and pushed `5c9bc8a..dd2d041` to `origin/main`.
+
+**Verification:** The commit contains 40 files. Backend tests were **64 passed**
+and the frontend production build passed before the commit.
+
+**Deployment limitation:** The existing Render backend continued serving the old
+build after several minutes (`history_range: "1y"`, no `stock_universe`). The
+push succeeded, but Render auto-deploy did not pick it up and this environment
+has no Render API credential or deploy hook. Deployment was therefore reported
+as unverified rather than claimed.
+
+### Turn 7 — Rebuild and package the finished ZIPs
+
+**Request:** Provide updated, complete backend and frontend ZIPs, with the
+frontend assets and SVG present.
+
+**Work:** Rebuilt the Vite production bundle and created:
+
+- `artifacts/sfb-backend.zip` — backend source, tests, tools, requirements and
+  `.env.example`; excludes the virtualenv, SQLite data and caches.
+- `artifacts/sfb-frontend.zip` — full frontend source plus the current `dist`.
+- `artifacts/sfb-frontend-deploy.zip` — deploy-root contents: `index.html`,
+  hashed JS/CSS under `assets/`, and `favicon.svg`.
+
+**Verification:** All archives passed `unzip -t`. The deploy ZIP contains the
+exact assets referenced by its `index.html` and includes the SVG favicon. This
+specifically avoided the earlier failure where a static host received source
+instead of build output or a bundle without its assets.
+
+### Turn 8 — Record the implementation log
+
+**Request:** Log and document entries for each turn.
+
+**Work:** Added this factual appendix to the build journal. It records each
+request, implementation, test evidence, result and limitation from the current
+chat, separately from the fictionalized narrative above.
+
+**Status:** Documentation-only change; no application behavior changed. The
+earlier source commit and generated ZIP artifacts remain independent of this log.

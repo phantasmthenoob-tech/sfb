@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-14T03:21:44.955735+00:00",
+  "generated_at": "2026-11-14T15:11:45.446278+00:00",
   "config": {
     "range": "10y",
     "seed": 20260914,
@@ -7,11 +7,13 @@
     "target_equity": 20000.0,
     "fee_bps_per_side": 5.0,
     "horizon_sessions": 5,
-    "max_positions": 5,
-    "target_position_pct": 0.18,
-    "entry_percentile": 0.8,
-    "exit_percentile": 0.55,
-    "rule": "Long-only, top-five percentile ranks, next-open fills; identical for every model."
+    "max_positions": 10,
+    "target_position_pct": 0.1,
+    "entry_percentile": 0.82,
+    "exit_percentile": 0.5,
+    "ml_target": "RF/GB raw five-session return; neural network cross-sectional return rank",
+    "ml_features": "RF/GB 11 compact features; neural network 26 features",
+    "rule": "Long-only, top-10 percentile ranks, next-open fills; identical for every model."
   },
   "versions": {
     "python": "3.12.3",
@@ -21,7 +23,7 @@
   "data": {
     "source": "yahoo",
     "interval": "1d",
-    "fetched_at": "2026-11-14T03:14:19.399348+00:00",
+    "fetched_at": "2026-11-14T14:59:35.373862+00:00",
     "tickers": [
       "AAPL",
       "MSFT",
@@ -168,7 +170,22 @@
       "news_count",
       "price_news",
       "market_trend",
-      "volume_trend"
+      "volume_trend",
+      "rsi14",
+      "range_pos_20",
+      "dist_sma20",
+      "dist_sma50",
+      "return_1",
+      "return_3",
+      "return_10",
+      "vol_ratio_5_20",
+      "market_return_5",
+      "market_return_20",
+      "market_vol_20",
+      "relative_strength_20",
+      "sector_relative_20",
+      "market_breadth",
+      "news_1d"
     ]
   },
   "folds": [
@@ -246,25 +263,25 @@
   "models": {
     "Price AI": {
       "starting_equity": 10000.0,
-      "final_equity": 19849.6,
-      "total_return_pct": 98.5,
-      "annualized_return_pct": 14.76,
-      "volatility_pct": 17.95,
-      "sharpe_ratio": 0.857,
-      "max_drawdown_pct": 18.24,
-      "calmar_ratio": 0.809,
+      "final_equity": 20144.92,
+      "total_return_pct": 101.45,
+      "annualized_return_pct": 15.1,
+      "volatility_pct": 16.81,
+      "sharpe_ratio": 0.922,
+      "max_drawdown_pct": 17.49,
+      "calmar_ratio": 0.863,
       "days": 1255,
-      "target_reached": false,
-      "return_multiple": 1.985,
-      "trades": 3703,
-      "turnover_x": 136.38,
-      "average_exposure_pct": 93.67,
+      "target_reached": true,
+      "return_multiple": 2.014,
+      "trades": 3983,
+      "turnover_x": 128.88,
+      "average_exposure_pct": 94.17,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": 8.69,
+          "return_pct": 15.65,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -272,7 +289,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": 6.16,
+          "return_pct": 7.01,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -280,7 +297,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 19.48,
+          "return_pct": 25.44,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -288,7 +305,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 15.01,
+          "return_pct": -2.99,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -296,7 +313,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 26.49,
+          "return_pct": 34.55,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -304,39 +321,39 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 108.74,
-          "volatility_pct": 16.19,
-          "sharpe_ratio": 1.275
+          "total_return_pct": 108.15,
+          "volatility_pct": 14.5,
+          "sharpe_ratio": 1.4
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -4.91,
-          "volatility_pct": 22.75,
-          "sharpe_ratio": -0.076
+          "total_return_pct": -3.22,
+          "volatility_pct": 22.74,
+          "sharpe_ratio": -0.009
         }
       }
     },
     "News AI": {
       "starting_equity": 10000.0,
-      "final_equity": 10274.9,
-      "total_return_pct": 2.75,
-      "annualized_return_pct": 0.55,
-      "volatility_pct": 15.13,
-      "sharpe_ratio": 0.112,
-      "max_drawdown_pct": 33.81,
-      "calmar_ratio": 0.016,
+      "final_equity": 12257.18,
+      "total_return_pct": 22.57,
+      "annualized_return_pct": 4.17,
+      "volatility_pct": 14.4,
+      "sharpe_ratio": 0.356,
+      "max_drawdown_pct": 28.37,
+      "calmar_ratio": 0.147,
       "days": 1255,
       "target_reached": false,
-      "return_multiple": 1.027,
-      "trades": 5569,
-      "turnover_x": 263.34,
-      "average_exposure_pct": 87.12,
+      "return_multiple": 1.226,
+      "trades": 6473,
+      "turnover_x": 248.18,
+      "average_exposure_pct": 87.78,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": -15.46,
+          "return_pct": -17.31,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -344,7 +361,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": -15.18,
+          "return_pct": 3.02,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -352,7 +369,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 11.54,
+          "return_pct": 5.57,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -360,7 +377,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 13.77,
+          "return_pct": 9.36,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -368,7 +385,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 13.89,
+          "return_pct": 24.17,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -376,39 +393,39 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 36.4,
-          "volatility_pct": 13.31,
-          "sharpe_ratio": 0.679
+          "total_return_pct": 59.9,
+          "volatility_pct": 12.14,
+          "sharpe_ratio": 1.076
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -24.67,
-          "volatility_pct": 19.86,
-          "sharpe_ratio": -1.123
+          "total_return_pct": -23.35,
+          "volatility_pct": 20.0,
+          "sharpe_ratio": -1.038
         }
       }
     },
     "Combined AI": {
       "starting_equity": 10000.0,
-      "final_equity": 19524.29,
-      "total_return_pct": 95.24,
-      "annualized_return_pct": 14.38,
-      "volatility_pct": 16.76,
-      "sharpe_ratio": 0.886,
-      "max_drawdown_pct": 24.12,
-      "calmar_ratio": 0.596,
+      "final_equity": 23345.91,
+      "total_return_pct": 133.46,
+      "annualized_return_pct": 18.56,
+      "volatility_pct": 16.0,
+      "sharpe_ratio": 1.145,
+      "max_drawdown_pct": 16.4,
+      "calmar_ratio": 1.132,
       "days": 1255,
-      "target_reached": false,
-      "return_multiple": 1.952,
-      "trades": 3807,
-      "turnover_x": 147.2,
-      "average_exposure_pct": 93.37,
+      "target_reached": true,
+      "return_multiple": 2.335,
+      "trades": 4101,
+      "turnover_x": 126.5,
+      "average_exposure_pct": 94.11,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": -2.53,
+          "return_pct": 8.97,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -416,7 +433,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": 18.66,
+          "return_pct": 8.9,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -424,7 +441,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 33.39,
+          "return_pct": 46.63,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -432,7 +449,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 7.03,
+          "return_pct": 8.33,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -440,7 +457,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 18.83,
+          "return_pct": 23.61,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -448,39 +465,39 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 157.64,
-          "volatility_pct": 14.44,
-          "sharpe_ratio": 1.794
+          "total_return_pct": 168.16,
+          "volatility_pct": 13.8,
+          "sharpe_ratio": 1.945
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -24.22,
-          "volatility_pct": 22.61,
-          "sharpe_ratio": -0.937
+          "total_return_pct": -12.94,
+          "volatility_pct": 21.57,
+          "sharpe_ratio": -0.442
         }
       }
     },
     "Random Forest": {
       "starting_equity": 10000.0,
-      "final_equity": 17233.89,
-      "total_return_pct": 72.34,
-      "annualized_return_pct": 11.55,
-      "volatility_pct": 22.71,
-      "sharpe_ratio": 0.595,
-      "max_drawdown_pct": 31.6,
-      "calmar_ratio": 0.365,
+      "final_equity": 18061.24,
+      "total_return_pct": 80.61,
+      "annualized_return_pct": 12.6,
+      "volatility_pct": 19.31,
+      "sharpe_ratio": 0.712,
+      "max_drawdown_pct": 20.39,
+      "calmar_ratio": 0.618,
       "days": 1255,
       "target_reached": false,
-      "return_multiple": 1.723,
-      "trades": 3396,
-      "turnover_x": 131.86,
-      "average_exposure_pct": 93.11,
+      "return_multiple": 1.806,
+      "trades": 3873,
+      "turnover_x": 130.97,
+      "average_exposure_pct": 93.45,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": -21.12,
+          "return_pct": -5.27,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -488,7 +505,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": 20.22,
+          "return_pct": 10.1,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -496,7 +513,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 38.3,
+          "return_pct": 32.12,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -504,7 +521,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 29.16,
+          "return_pct": 24.3,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -512,7 +529,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 2.99,
+          "return_pct": 6.05,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -520,39 +537,39 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 111.2,
-          "volatility_pct": 21.2,
-          "sharpe_ratio": 1.032
+          "total_return_pct": 98.95,
+          "volatility_pct": 17.59,
+          "sharpe_ratio": 1.115
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -18.4,
-          "volatility_pct": 27.0,
-          "sharpe_ratio": -0.511
+          "total_return_pct": -9.22,
+          "volatility_pct": 24.07,
+          "sharpe_ratio": -0.224
         }
       }
     },
     "Gradient Boosting": {
       "starting_equity": 10000.0,
-      "final_equity": 16919.68,
-      "total_return_pct": 69.2,
-      "annualized_return_pct": 11.14,
-      "volatility_pct": 21.08,
-      "sharpe_ratio": 0.607,
-      "max_drawdown_pct": 29.83,
-      "calmar_ratio": 0.373,
+      "final_equity": 19483.94,
+      "total_return_pct": 94.84,
+      "annualized_return_pct": 14.33,
+      "volatility_pct": 17.43,
+      "sharpe_ratio": 0.856,
+      "max_drawdown_pct": 19.96,
+      "calmar_ratio": 0.718,
       "days": 1255,
       "target_reached": false,
-      "return_multiple": 1.692,
-      "trades": 5346,
-      "turnover_x": 298.26,
-      "average_exposure_pct": 85.36,
+      "return_multiple": 1.948,
+      "trades": 7136,
+      "turnover_x": 314.12,
+      "average_exposure_pct": 85.22,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": -17.07,
+          "return_pct": -3.03,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -560,7 +577,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": 5.54,
+          "return_pct": 3.98,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -568,7 +585,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 27.53,
+          "return_pct": 32.76,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -576,7 +593,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 36.52,
+          "return_pct": 23.87,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -584,7 +601,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 10.79,
+          "return_pct": 19.53,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -592,39 +609,39 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 120.23,
-          "volatility_pct": 20.08,
-          "sharpe_ratio": 1.133
+          "total_return_pct": 125.32,
+          "volatility_pct": 15.92,
+          "sharpe_ratio": 1.419
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -23.17,
-          "volatility_pct": 23.93,
-          "sharpe_ratio": -0.824
+          "total_return_pct": -13.53,
+          "volatility_pct": 21.55,
+          "sharpe_ratio": -0.47
         }
       }
     },
     "Neural Network": {
       "starting_equity": 10000.0,
-      "final_equity": 12029.66,
-      "total_return_pct": 20.3,
-      "annualized_return_pct": 3.78,
-      "volatility_pct": 21.29,
-      "sharpe_ratio": 0.28,
-      "max_drawdown_pct": 37.89,
-      "calmar_ratio": 0.1,
+      "final_equity": 16448.3,
+      "total_return_pct": 64.48,
+      "annualized_return_pct": 10.51,
+      "volatility_pct": 16.78,
+      "sharpe_ratio": 0.68,
+      "max_drawdown_pct": 25.8,
+      "calmar_ratio": 0.407,
       "days": 1255,
       "target_reached": false,
-      "return_multiple": 1.203,
-      "trades": 6556,
-      "turnover_x": 346.93,
-      "average_exposure_pct": 81.45,
+      "return_multiple": 1.645,
+      "trades": 8208,
+      "turnover_x": 349.44,
+      "average_exposure_pct": 82.8,
       "folds": [
         {
           "fold": 1,
           "start_date": "2021-11-15",
           "end_date": "2022-11-14",
-          "return_pct": -26.44,
+          "return_pct": -5.93,
           "benchmark_spy_return_pct": -15.47,
           "regime": "bear"
         },
@@ -632,7 +649,7 @@
           "fold": 2,
           "start_date": "2022-11-15",
           "end_date": "2023-11-14",
-          "return_pct": -6.45,
+          "return_pct": 5.37,
           "benchmark_spy_return_pct": 12.61,
           "regime": "bull"
         },
@@ -640,7 +657,7 @@
           "fold": 3,
           "start_date": "2023-11-15",
           "end_date": "2024-11-13",
-          "return_pct": 20.5,
+          "return_pct": 5.91,
           "benchmark_spy_return_pct": 32.8,
           "regime": "bull"
         },
@@ -648,7 +665,7 @@
           "fold": 4,
           "start_date": "2024-11-14",
           "end_date": "2025-11-13",
-          "return_pct": 2.36,
+          "return_pct": 16.12,
           "benchmark_spy_return_pct": 13.26,
           "regime": "bull"
         },
@@ -656,7 +673,7 @@
           "fold": 5,
           "start_date": "2025-11-14",
           "end_date": "2026-11-13",
-          "return_pct": 42.82,
+          "return_pct": 34.63,
           "benchmark_spy_return_pct": 12.27,
           "regime": "bull"
         }
@@ -664,32 +681,32 @@
       "regimes": {
         "bull": {
           "days": 960,
-          "total_return_pct": 75.28,
-          "volatility_pct": 18.05,
-          "sharpe_ratio": 0.907
+          "total_return_pct": 77.41,
+          "volatility_pct": 13.77,
+          "sharpe_ratio": 1.162
         },
         "bear": {
           "days": 294,
-          "total_return_pct": -31.37,
-          "volatility_pct": 29.4,
-          "sharpe_ratio": -0.952
+          "total_return_pct": -7.29,
+          "volatility_pct": 24.08,
+          "sharpe_ratio": -0.149
         }
       }
     }
   },
   "success": {
     "target_20k": {
-      "Price AI": false,
+      "Price AI": true,
       "News AI": false,
-      "Combined AI": false,
+      "Combined AI": true,
       "Random Forest": false,
       "Gradient Boosting": false,
       "Neural Network": false
     },
     "beats_100pct": {
-      "Price AI": false,
+      "Price AI": true,
       "News AI": false,
-      "Combined AI": false,
+      "Combined AI": true,
       "Random Forest": false,
       "Gradient Boosting": false,
       "Neural Network": false
@@ -700,7 +717,7 @@
       "Combined AI": true,
       "Random Forest": true,
       "Gradient Boosting": true,
-      "Neural Network": false
+      "Neural Network": true
     },
     "multiple_100pct_folds": {
       "Price AI": false,
@@ -714,8 +731,8 @@
       "Price AI": true,
       "News AI": false,
       "Combined AI": true,
-      "Random Forest": false,
-      "Gradient Boosting": false,
+      "Random Forest": true,
+      "Gradient Boosting": true,
       "Neural Network": false
     }
   }

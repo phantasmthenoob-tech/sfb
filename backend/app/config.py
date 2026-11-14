@@ -101,7 +101,19 @@ class Settings:
     # A self-request counts as inbound traffic on Render, so one successful wake
     # can keep a single free service alive without an external scheduler.
     self_keepalive_seconds: float = field(
-        default_factory=lambda: _env_float("SELF_KEEPALIVE_SECONDS", 240.0)
+        default_factory=lambda: _env_float("SELF_KEEPALIVE_SECONDS", 60.0)
+    )
+
+    # Live neural-network model. The model is trained from the bars already in
+    # SQLite, so a deployment can rebuild it without a separate research job.
+    model_dir: str = field(
+        default_factory=lambda: os.environ.get(
+            "MODEL_DIR", str(Path(__file__).resolve().parent.parent / "data" / "models")
+        )
+    )
+    ml_autotrain: bool = field(
+        default_factory=lambda: os.environ.get("ML_AUTOTRAIN", "1").lower()
+        not in ("0", "false", "no")
     )
 
     def as_public_dict(self) -> dict:
@@ -127,4 +139,5 @@ class Settings:
             "live_poll_seconds": self.live_poll_seconds,
             "live_decision_seconds": self.live_decision_seconds,
             "self_keepalive_seconds": self.self_keepalive_seconds,
+            "ml_autotrain": self.ml_autotrain,
         }

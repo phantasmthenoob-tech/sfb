@@ -3,7 +3,7 @@
 The experiment deliberately differs from the live simulation in one way: it
 uses a single, identical cross-sectional trading rule for every model. Each
 model only supplies a daily score; scores are converted to a percentile rank
-across the stock universe, and the same top-five / 5 bps-per-side rule is
+across the stock universe, and the same top-ten / 5 bps-per-side rule is
 applied to all six models.
 
 Walk-forward protocol
@@ -41,16 +41,17 @@ from pathlib import Path
 from app.ai.features import clamp, technical_score
 from app.config import DEFAULT_UNIVERSE, FORECAST_HORIZON_SESSIONS
 from app.market.news_provider import generate_news_for_dates
+from app.market.universe import PROFILE_BY_SYMBOL
 from app.market.yahoo_provider import fetch_daily_bars
 
 START_CAPITAL = 10_000.0
 TARGET_EQUITY = 20_000.0
 FEE_RATE = 0.0005  # 5 bps per side, matching the live simulator
 HORIZON = FORECAST_HORIZON_SESSIONS
-MAX_POSITIONS = 5
-TARGET_POSITION_PCT = 0.18
-ENTRY_PERCENTILE = 0.80
-EXIT_PERCENTILE = 0.55
+MAX_POSITIONS = 10
+TARGET_POSITION_PCT = 0.10
+ENTRY_PERCENTILE = 0.82
+EXIT_PERCENTILE = 0.50
 TRADING_DAYS_PER_YEAR = 252
 
 FEATURE_NAMES = (
@@ -65,6 +66,21 @@ FEATURE_NAMES = (
     "price_news",
     "market_trend",
     "volume_trend",
+    "rsi14",
+    "range_pos_20",
+    "dist_sma20",
+    "dist_sma50",
+    "return_1",
+    "return_3",
+    "return_10",
+    "vol_ratio_5_20",
+    "market_return_5",
+    "market_return_20",
+    "market_vol_20",
+    "relative_strength_20",
+    "sector_relative_20",
+    "market_breadth",
+    "news_1d",
 )
 
 
@@ -139,6 +155,26 @@ def _market_trend(closes: list[float | None], offset: int) -> float:
     return clamp(math.tanh((fast / slow - 1.0) * 60.0), -1.0, 1.0)
 
 
+def _sma_at(values: list[float], offset: int, window: int) -> float | None:
+    if offset + 1 < window:
+        return None
+    return sum(values[offset - window + 1 : offset + 1]) / window
+
+
+def _realized_vol(values: list[float], offset: int, window: int) -> float:
+    if offset < window:
+        return 0.0
+    returns = [
+        values[index] / values[index - 1] - 1.0
+        for index in range(offset - window + 1, offset + 1)
+        if values[index - 1]
+    ]
+    if len(returns) < 2:
+        return 0.0
+    mean = sum(returns) / len(returns)
+    return math.sqrt(sum((value - mean) ** 2 for value in returns) / len(returns))
+
+
 def build_feature_rows(
     *,
     dates: list[str],
@@ -155,6 +191,39 @@ def build_feature_rows(
         bars.get("SPY", {}).get(offset, {}).get("close") for offset in range(count)
     ]
     market_trend = [_market_trend(market_closes, offset) for offset in range(count)]
+    market_series = [value or 0.0 for value in market_closes]
+    market_return_5 = [_return(market_series, offset, 5) for offset in range(count)]
+    market_return_20 = [_return(market_series, offset, 20) for offset in range(count)]
+    market_vol = [_realized_vol(market_series, offset, 20) for offset in range(count)]
+
+    stock_tickers = [
+        ticker
+        for ticker in tickers
+        if (profile := PROFILE_BY_SYMBOL.get(ticker)) is not None
+        and profile.kind == "stock"
+    ]
+    stock_closes: dict[str, list[float]] = {}
+    for ticker in stock_tickers:
+        series = bars.get(ticker)
+        if series and all(offset in series for offset in range(count)):
+            stock_closes[ticker] = [series[offset]["close"] for offset in range(count)]
+    breadth = [0.5] * count
+    sector_returns: list[dict[str, float]] = [{} for _ in range(count)]
+    sectors: dict[str, list[str]] = defaultdict(list)
+    for ticker in stock_closes:
+        profile = PROFILE_BY_SYMBOL.get(ticker)
+        if profile and profile.sector:
+            sectors[profile.sector].append(ticker)
+    for offset in range(count):
+        above = 0
+        for closes in stock_closes.values():
+            average = _sma_at(closes, offset, 20)
+            if average:
+                above += closes[offset] > average
+        breadth[offset] = above / len(stock_closes) if stock_closes else 0.5
+        for sector, members in sectors.items():
+            values = [_return(stock_closes[ticker], offset, 20) for ticker in members]
+            sector_returns[offset][sector] = sum(values) / len(values) if values else 0.0
 
     def sentiment_at(ticker: str, offset: int, window: int = 5) -> tuple[float, int]:
         total = 0.0
@@ -205,6 +274,18 @@ def build_feature_rows(
                 if technical["slow_sma"]
                 else 0.0
             )
+            ret5 = _return(closes, offset, 5)
+            ret20 = _return(closes, offset, 20)
+            average20 = _sma_at(closes, offset, 20)
+            average50 = _sma_at(closes, offset, 50)
+            window = closes[max(0, offset - 19) : offset + 1]
+            low, high = min(window), max(window)
+            range_pos = (closes[offset] - low) / (high - low) - 0.5 if high > low else 0.0
+            vol5 = _realized_vol(closes, offset, 5)
+            vol20 = _realized_vol(closes, offset, 20)
+            profile = PROFILE_BY_SYMBOL.get(ticker)
+            sector = profile.sector if profile else None
+            recent_news = clamp(sentiment_at(ticker, offset, window=0)[0] * 1.5, -1.0, 1.0)
             rows.append(
                 Sample(
                     offset=offset,
@@ -214,13 +295,34 @@ def build_feature_rows(
                         technical["momentum"],
                         cross,
                         technical["volatility"] or 0.0,
-                        _return(closes, offset, 5),
-                        _return(closes, offset, 20),
+                        ret5,
+                        ret20,
                         news_component,
                         min(headlines, 5) / 5.0,
                         price_score * news_component,
                         market_trend[offset],
                         _volume_trend(volumes, offset),
+                        _rsi(closes, offset),
+                        clamp(range_pos * 2.0, -1.0, 1.0),
+                        math.tanh((closes[offset] / average20 - 1.0) * 30.0)
+                        if average20
+                        else 0.0,
+                        math.tanh((closes[offset] / average50 - 1.0) * 20.0)
+                        if average50
+                        else 0.0,
+                        _return(closes, offset, 1),
+                        _return(closes, offset, 3),
+                        _return(closes, offset, 10),
+                        clamp(vol5 / vol20 - 1.0, -3.0, 3.0) if vol20 else 0.0,
+                        market_return_5[offset],
+                        market_return_20[offset],
+                        market_vol[offset],
+                        clamp(ret20 - market_return_20[offset], -0.5, 0.5),
+                        clamp(ret20 - sector_returns[offset].get(sector, 0.0), -0.5, 0.5)
+                        if sector
+                        else 0.0,
+                        breadth[offset] - 0.5,
+                        recent_news,
                     ),
                     label=(
                         clamp(
@@ -321,18 +423,46 @@ def _percentile_scores(
     return ranked
 
 
+def _rank_targets(rows: list[Sample]) -> list[float]:
+    """Convert raw forward returns into a within-session percentile target.
+
+    The portfolio only cares about the cross-sectional order of scores, not
+    whether the whole market rose or fell over the next five sessions. Ranking
+    the training labels removes that common market move while keeping the
+    relative winner/loser information. This transform is applied only to the
+    training labels; validation returns are never used for fitting.
+    """
+    by_offset: dict[int, list[int]] = defaultdict(list)
+    for index, row in enumerate(rows):
+        if row.label is not None:
+            by_offset[row.offset].append(index)
+    targets = [0.0] * len(rows)
+    for indices in by_offset.values():
+        ordered = sorted(indices, key=lambda index: (rows[index].label, rows[index].ticker))
+        denominator = max(1, len(ordered) - 1)
+        for rank, index in enumerate(ordered):
+            targets[index] = rank / denominator - 0.5
+    return targets
+
+
 def _fit_ml_models(rows: list[Sample], seed: int) -> dict[str, object]:
-    """Fit the three ML baselines on an already-purged training set."""
+    """Fit the three ML baselines on an already-purged training set.
+
+    The tree models keep the original absolute-return target and the compact
+    price/news feature set. The neural network uses the expanded feature set
+    and a cross-sectional rank target, which removed the common market move and
+    improved its validation ranking without helping the trees.
+    """
     import numpy as np
     from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
     from sklearn.neural_network import MLPRegressor
 
-    matrix = np.asarray([row.features for row in rows], dtype=float)
-    labels = np.asarray([row.label for row in rows if row.label is not None], dtype=float)
-    means = matrix.mean(axis=0)
-    scales = matrix.std(axis=0)
-    scales[scales == 0] = 1.0
-    normalized = (matrix - means) / scales
+    rows = [row for row in rows if row.label is not None]
+    base_count = 11
+    raw_target = np.asarray([row.label for row in rows], dtype=float)
+    rank_target = np.asarray(_rank_targets(rows), dtype=float)
+    full_matrix = np.asarray([row.features for row in rows], dtype=float)
+    base_matrix = full_matrix[:, :base_count]
     models: dict[str, object] = {
         "Random Forest": RandomForestRegressor(
             n_estimators=140,
@@ -343,10 +473,10 @@ def _fit_ml_models(rows: list[Sample], seed: int) -> dict[str, object]:
             random_state=seed,
         ),
         "Gradient Boosting": HistGradientBoostingRegressor(
-            max_iter=160,
-            learning_rate=0.05,
+            max_iter=300,
+            learning_rate=0.035,
             max_leaf_nodes=31,
-            l2_regularization=0.1,
+            l2_regularization=0.5,
             early_stopping=True,
             validation_fraction=0.1,
             random_state=seed,
@@ -364,11 +494,32 @@ def _fit_ml_models(rows: list[Sample], seed: int) -> dict[str, object]:
             random_state=seed,
         ),
     }
+    specs = {
+        "Random Forest": (base_matrix, raw_target),
+        "Gradient Boosting": (base_matrix, raw_target),
+        "Neural Network": (full_matrix, rank_target),
+    }
+    means: dict[str, object] = {}
+    scales: dict[str, object] = {}
+    feature_counts: dict[str, int] = {}
     for name, model in models.items():
+        matrix, target = specs[name]
+        feature_means = matrix.mean(axis=0)
+        feature_scales = matrix.std(axis=0)
+        feature_scales[feature_scales == 0] = 1.0
+        means[name] = feature_means
+        scales[name] = feature_scales
+        feature_counts[name] = matrix.shape[1]
         started = time.time()
-        model.fit(normalized, labels)
+        model.fit((matrix - feature_means) / feature_scales, target)
         print(f"    fitted {name} on {len(rows):,} rows in {time.time() - started:.1f}s", flush=True)
-    return {"models": models, "means": means, "scales": scales, "feature_names": FEATURE_NAMES}
+    return {
+        "models": models,
+        "means": means,
+        "scales": scales,
+        "feature_counts": feature_counts,
+        "feature_names": FEATURE_NAMES,
+    }
 
 
 def _predict_ml(
@@ -377,9 +528,10 @@ def _predict_ml(
     import numpy as np
 
     matrix = np.asarray([row.features for row in rows], dtype=float)
-    normalized = (matrix - fitted["means"]) / fitted["scales"]
     predictions: dict[str, list[float]] = {}
     for name, model in fitted["models"].items():
+        count = fitted["feature_counts"][name]
+        normalized = (matrix[:, :count] - fitted["means"][name]) / fitted["scales"][name]
         predictions[name] = [
             float(value) if math.isfinite(float(value)) else 0.0
             for value in model.predict(normalized)
@@ -498,7 +650,7 @@ def simulate_ranked(
     start_offset: int,
     fee_rate: float = FEE_RATE,
 ) -> dict:
-    """Run the identical top-five rule on one model's percentile scores."""
+    """Run the identical top-ten rule on one model's percentile scores."""
     cash = START_CAPITAL
     positions: dict[str, int] = {}
     pending: list[tuple[str, str, int]] = []
@@ -794,7 +946,9 @@ def run_experiment(
             "target_position_pct": TARGET_POSITION_PCT,
             "entry_percentile": ENTRY_PERCENTILE,
             "exit_percentile": EXIT_PERCENTILE,
-            "rule": "Long-only, top-five percentile ranks, next-open fills; identical for every model.",
+            "ml_target": "RF/GB raw five-session return; neural network cross-sectional return rank",
+            "ml_features": "RF/GB 11 compact features; neural network 26 features",
+            "rule": f"Long-only, top-{MAX_POSITIONS} percentile ranks, next-open fills; identical for every model.",
         },
         "versions": {
             "python": __import__("sys").version.split()[0],

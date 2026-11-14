@@ -18,6 +18,8 @@ def make_settings(tmp_path, **overrides) -> Settings:
         autostart=False,
         data_source="synthetic",
         seed=4242,
+        model_dir=str(tmp_path / "models"),
+        ml_autotrain=False,
     )
     return replace(base, **overrides) if overrides else base
 
