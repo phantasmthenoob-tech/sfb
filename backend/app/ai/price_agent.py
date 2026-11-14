@@ -9,11 +9,12 @@ from ..trading.portfolio import PortfolioState
 
 class PriceAgent(BaseAgent):
     model_type = "price"
-    entry_threshold = 0.30
-    exit_threshold = 0.05
+    entry_threshold = 0.45
+    exit_threshold = -0.05
     max_entries = 2
     target_position_pct = 0.16
     target_short_pct = 0.10
+    allow_short = False
 
     def evaluate(self, context: MarketContext, state: PortfolioState) -> list[Signal]:
         signals: list[Signal] = []

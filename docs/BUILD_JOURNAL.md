@@ -13,9 +13,9 @@ The first backend commit is on **11/11/26**; the first frontend commit is on
 **11/18/26**. The journal then follows the project through launch, the first
 users, the ugly deployment failures, the quieter hardening work, and a long
 post-launch period of experiments, dead ends and architecture decisions, ending
-on **01/07/27**.
+on **01/08/27**.
 
-There are **55 entries** across **60 dates**. Some days are not listed. I have
+There are **56 entries** across **61 dates**. Some days are not listed. I have
 a lot of homework now and I take breaks, so **11/15/26, 11/21/26, 11/22/26,
 11/28/26 and 11/29/26** are full rest days rather than missing work. Every other
 date in the range has an entry, including the weekends and holidays when I
@@ -63,6 +63,7 @@ first few days are reconstructed rather than pasted from a daily file.
 | 01/02–01/05/27 | Architecture records, regression pass, final docs | The last decisions were about what not to build |
 | 01/06/27 | Render sleep and live mode | The engine was fine; the service was asleep |
 | 01/07/27 | Forecast lookbacks and Predict now | A quiet day; deciding what the model should admit it sees |
+| 01/08/27 | The black screen returned | The app was fine; the host was serving source |
 
 ---
 
@@ -2904,6 +2905,99 @@ are like that.
 
 The lookbacks were visible, the button was wired to a record-only path, and the
 tests proved it did not trade. The day was done.
+
+---
+
+## Day 56 — 01/08/27
+
+### Morning: “the entire screen is black again”
+
+The message was short and familiar: the entire screen was black again. I had
+just finished the forecast accuracy scorecard, so my first assumption was that I
+had broken the frontend. A bad hook, a missing field, a component that crashed
+before React could paint anything — those all look like a black page.
+
+I opened the deployed URL instead of guessing. The page title loaded. The body
+was empty. That narrowed it down immediately: the HTML was arriving, but the
+application bundle was not running.
+
+### Midday: the console knew before I did
+
+The browser console had two errors. The important one said the module script
+failed because the server responded with an empty MIME type. The network tab
+showed the reason: the page was requesting `/src/main.tsx` and getting a 200.
+The favicon was a 404. The served HTML contained:
+
+```html
+<script type="module" src="/src/main.tsx"></script>
+```
+
+That is the Vite development entry point. A static host cannot compile TSX. The
+browser downloaded source code as a module, refused to execute it, and left the
+empty `#root` div sitting on a dark background. It looked like a frontend
+failure. It was an upload failure.
+
+The built files were fine. `frontend/dist/index.html` referenced the hashed
+bundle and stylesheet:
+
+```html
+<script type="module" crossorigin src="/assets/index-Do3xymQj.js"></script>
+<link rel="stylesheet" crossorigin href="/assets/index-Bkrb0fWz.css">
+```
+
+The scorecard was in that bundle. None of it reached the browser because the
+host was publishing the source folder instead of the build output.
+
+### Afternoon: the same mistake, one more time
+
+I have made this mistake before. I wrote the troubleshooting note. I knew that
+the deployable artifact is the **contents** of `frontend/dist`, not the
+`frontend` folder. And still, when I packaged the updated frontend and uploaded
+it, the root of the site ended up with the development `index.html` while the
+real build sat one level deeper under `dist`.
+
+The frustrating part is that nothing about the application was broken. The
+backend tests were green. The frontend build had passed. The scorecard existed
+in the bundle. The only broken thing was the handoff between the build output
+and the static host.
+
+I checked the artifact again to be sure:
+
+- `frontend/dist/index.html` references `/assets/index-*.js`.
+- `frontend/dist/assets/` contains the JavaScript and CSS.
+- `frontend/index.html` references `/src/main.tsx`.
+
+Those two files are supposed to be different. On the host, they had become the
+same file at the publish root.
+
+### Evening: the fix is boring, which is the point
+
+The fix is not a code change. Publish the contents of `frontend/dist` so that
+the site root contains:
+
+```text
+index.html
+assets/index-*.js
+assets/index-*.css
+favicon.svg
+```
+
+Do not publish the `frontend` folder. Do not publish `frontend/index.html`.
+After uploading, open the page source and confirm the script tag points at
+`/assets/`, not `/src/main.tsx`. Then hard-refresh once to clear the old HTML.
+The SPA rewrite still needs to send unknown routes back to `index.html`.
+
+I could confirm the diagnosis and the correct artifact from here, but I could
+not reach the host's file manager, so I did not pretend the production site was
+fixed. I wrote the steps down instead of relying on memory. The next upload
+should be one folder shallower than the last one.
+
+### End of day
+
+The application was fine. The deployment was serving the wrong folder, and the
+black screen was the browser refusing to compile source it should never have
+received. It was not a clever bug. It was the same boring handoff mistake, and
+boring mistakes still count.
 
 ### End of journal
 

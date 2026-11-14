@@ -138,10 +138,38 @@ button:disabled {
   color: var(--faint);
 }
 
+.clock-window {
+  color: var(--faint);
+  font-size: 11px;
+}
+
 .controls {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.range-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.range-control select {
+  border: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.range-control select:focus {
+  outline: none;
 }
 
 .speeds {
@@ -313,6 +341,53 @@ main {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scorecard-card {
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.scorecard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scorecard-head strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scorecard-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+
+.scorecard-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.scorecard-value {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.scorecard-empty {
+  margin: 0 0 10px;
 }
 
 .forecast-hero {
@@ -506,6 +581,30 @@ main {
 }
 
 /* -------------------------------------------------------------- leaderboard */
+.overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.sector-table-wrap {
+  overflow-x: auto;
+}
+
+.sector-table td:first-child {
+  white-space: normal;
+  min-width: 170px;
+}
+
+.sector-table .positive {
+  color: var(--green);
+}
+
+.sector-table .negative {
+  color: var(--red);
+}
+
 .quote-list {
   margin: 0;
   padding: 0;
@@ -551,9 +650,89 @@ main {
 }
 
 /* ----------------------------------------------------------------- markets */
+.market-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.kind-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.kind-toggle button,
+.market-filters select {
+  flex: 1;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  font-size: 11px;
+}
+
+.kind-toggle button.filter-active {
+  border-color: var(--text);
+  background: var(--text);
+  color: #fff;
+}
+
+.recording-status {
+  color: var(--green);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quote-name {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.quote-sector {
+  margin-top: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.exposure-tags,
+.sector-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.exposure-tags .tag,
+.sector-tags .tag {
+  margin-left: 0;
+}
+
+.correlation-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.correlation-strip strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .ticker-list {
+  max-height: 560px;
   margin: 0;
-  padding: 0;
+  padding: 0 2px 0 0;
+  overflow-y: auto;
   list-style: none;
 }
 
@@ -769,12 +948,17 @@ main {
   .overview,
   .markets,
   .trading-top,
-  .forecast-grid {
+  .forecast-grid,
+  .scorecard-grid {
     grid-template-columns: 1fr;
   }
 
   .quote-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sector-table {
+    font-size: 11px;
   }
 }
 
@@ -785,6 +969,7 @@ main {
 
   .controls {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
   }
 

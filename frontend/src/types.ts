@@ -15,6 +15,12 @@ export interface LiveState {
   reference?: string;
 }
 
+export interface ReplayRangeOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
 export interface SimulationState {
   status: SimulationStatus;
   mode: SimulationMode;
@@ -27,12 +33,23 @@ export interface SimulationState {
   session_date: string;
   start_date: string;
   end_date: string;
+  data_start_date?: string;
+  data_end_date?: string;
   progress_pct: number;
   decision_every_bars: number;
+  replay_preset?: string;
+  range_start_bar?: number;
+  range_end_bar?: number;
+  range_bars?: number;
+  range_options?: ReplayRangeOption[];
 }
 
 export interface Quote {
   ticker: string;
+  name?: string;
+  kind?: "stock" | "etf";
+  sector?: string | null;
+  exposures?: string[];
   price: number;
   open: number;
   high: number;
@@ -96,6 +113,17 @@ export interface LeaderboardEntry extends Portfolio {
   rank: number;
 }
 
+export interface RecordingInfo {
+  enabled: boolean;
+  bars: number;
+  sessions: number;
+  tickers: number;
+  first_date: string | null;
+  last_date: string | null;
+  last_recorded_at: string | null;
+  note: string;
+}
+
 export interface DataSourceInfo {
   source: string;
   label: string;
@@ -106,6 +134,7 @@ export interface DataSourceInfo {
   refresh_hours: number;
   note: string;
   stale: boolean;
+  recording?: RecordingInfo;
   live?: LiveState;
 }
 
@@ -139,6 +168,78 @@ export interface ForecastMeta {
   note: string;
 }
 
+export interface ForecastScorecardAgent {
+  agent_id: number;
+  agent_name: string;
+  model_type: string;
+  settled_calls: number;
+  hits: number;
+  hit_rate_pct: number | null;
+  avg_abs_error_pct: number | null;
+  avg_abs_move_pct: number | null;
+  open_calls: number;
+}
+
+export interface ForecastScorecard {
+  horizon_sessions: number;
+  settled_calls: number;
+  open_calls: number;
+  agents: ForecastScorecardAgent[];
+  sim_time: string | null;
+  generated_at: string;
+}
+
+export interface TickerMeta {
+  ticker: string;
+  name: string;
+  kind: "stock" | "etf";
+  sector: string | null;
+  exposures: string[];
+}
+
+export interface UniverseMeta {
+  stocks: TickerMeta[];
+  etfs: TickerMeta[];
+  sectors: string[];
+  exposures: string[];
+}
+
+export interface SectorAgentPerformance {
+  agent_id: number;
+  agent_name: string;
+  model_type: string;
+  sector: string;
+  contribution_pct: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  fees: number;
+  positions_value: number;
+  trades: number;
+  open_positions: number;
+}
+
+export interface SectorPerformance {
+  agents: { id: number; name: string; model_type: string }[];
+  sectors: {
+    sector: string;
+    exposures: string[];
+    agents: SectorAgentPerformance[];
+  }[];
+  note: string;
+}
+
+export interface CorrelationSummary {
+  window_sessions: number;
+  tickers: number;
+  pairs: number;
+  average_pairwise_correlation: number;
+  same_sector_average: number | null;
+  cross_sector_average: number | null;
+  top_pairs: { left: string; right: string; correlation: number }[];
+  bottom_pairs: { left: string; right: string; correlation: number }[];
+  note: string;
+}
+
 export interface Snapshot {
   type: "snapshot";
   simulation: SimulationState;
@@ -149,6 +250,7 @@ export interface Snapshot {
   leaderboard: LeaderboardEntry[];
   manual: Portfolio | null;
   data: DataSourceInfo;
+  universe_meta?: UniverseMeta;
   server_time: string;
 }
 

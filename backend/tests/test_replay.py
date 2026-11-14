@@ -23,6 +23,18 @@ def engine(tmp_path):
     db.close()
 
 
+def test_self_keepalive_url_resolution(engine, monkeypatch):
+    monkeypatch.delenv("KEEPALIVE_URL", raising=False)
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    assert engine._keepalive_url() is None
+
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://demo.onrender.com/")
+    assert engine._keepalive_url() == "https://demo.onrender.com/api/health"
+
+    monkeypatch.setenv("KEEPALIVE_URL", "https://monitor.example.com/ping")
+    assert engine._keepalive_url() == "https://monitor.example.com/ping"
+
+
 def test_market_orders_fill_at_next_bar_open(engine):
     repo = engine.repo
     engine.play()
@@ -116,6 +128,14 @@ def test_agents_compete_with_identical_starting_capital(tmp_path):
     repo = Repository(db)
     engine = SimulationEngine(repo, settings)
     engine.initialize()
+    strategies = {agent.model_type: agent for agent in engine.competition.agents}
+    assert strategies["price"].entry_threshold == pytest.approx(0.45)
+    assert strategies["news"].entry_threshold == pytest.approx(0.35)
+    assert strategies["combined"].entry_threshold == pytest.approx(0.45)
+    assert not any(agent.allow_short for agent in strategies.values())
+    assert len(settings.stock_universe) == 120
+    assert "SPY" in settings.etf_universe
+    assert "SPY" not in settings.stock_universe
     engine.play()
     while engine.tick():
         pass
@@ -134,6 +154,54 @@ def test_agents_compete_with_identical_starting_capital(tmp_path):
     assert returns == sorted(returns, reverse=True)
     engine.shutdown()
     db.close()
+
+
+def test_replay_range_presets_limit_the_clock_and_persist(tmp_path):
+    settings = make_settings(
+        tmp_path,
+        replay_sessions=10,
+        bars_per_session=12,
+        agent_decision_every=50,
+    )
+    db = Database(settings.db_path)
+    repo = Repository(db)
+    engine = SimulationEngine(repo, settings)
+    engine.initialize()
+    try:
+        engine.set_replay_range("1w")
+        status = engine.status_payload()
+        assert status["replay_preset"] == "1w"
+        assert 0 < status["range_start_bar"] < status["range_end_bar"]
+        assert status["range_bars"] < engine.total_bars
+        assert engine.cursor == status["range_start_bar"]
+        assert status["progress_pct"] > 0
+        assert status["start_date"] < status["end_date"]
+
+        engine.play()
+        while engine.tick():
+            pass
+        assert engine.status == "completed"
+        assert engine.cursor == status["range_end_bar"]
+
+        engine.reset()
+        assert engine.cursor == status["range_start_bar"]
+        manual = repo.get_manual_portfolio()
+        assert manual["cash"] == pytest.approx(settings.starting_balance)
+
+        engine.shutdown()
+        again = SimulationEngine(repo, settings)
+        again.initialize()
+        assert again.status_payload()["replay_preset"] == "1w"
+        assert again.status_payload()["range_start_bar"] == status["range_start_bar"]
+        again.shutdown()
+    finally:
+        engine.shutdown()
+        db.close()
+
+
+def test_replay_range_rejects_unknown_presets(engine):
+    with pytest.raises(ValueError):
+        engine.set_replay_range("decade")
 
 
 def test_finished_replay_has_no_dangling_orders_and_can_restart(engine):

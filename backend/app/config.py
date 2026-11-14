@@ -5,19 +5,17 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Universe used both for the replay data and for the tradable universe.
-DEFAULT_UNIVERSE: tuple[str, ...] = (
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "TSLA",
-    "AMZN",
-    "GOOGL",
-    "META",
-    "AMD",
+from .market.universe import (
+    DEFAULT_ETFS,
+    DEFAULT_STOCKS,
+    DEFAULT_UNIVERSE,
+    is_stock,
 )
 
 SPEED_OPTIONS: tuple[int, ...] = (1, 5, 10, 30)
+
+# Forecasts are judged against the close this many bars after they are made.
+FORECAST_HORIZON_SESSIONS = 5
 
 
 def _default_db_path() -> str:
@@ -45,6 +43,15 @@ class Settings:
 
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
 
+    @property
+    def stock_universe(self) -> tuple[str, ...]:
+        """Individual stocks the agents may trade; ETFs are benchmarks only."""
+        return tuple(ticker for ticker in self.universe if is_stock(ticker))
+
+    @property
+    def etf_universe(self) -> tuple[str, ...]:
+        return tuple(ticker for ticker in self.universe if not is_stock(ticker))
+
     # Simulated transaction costs.
     fee_bps: float = 5.0  # 5 bps = 0.05% of notional, per side
     borrow_rate_annual: float = 0.08  # 8% annualised borrow fee on short market value
@@ -64,7 +71,7 @@ class Settings:
         default_factory=lambda: _env_float("MARKET_DATA_REFRESH_HOURS", 24.0)
     )
     history_range: str = field(
-        default_factory=lambda: os.environ.get("MARKET_HISTORY_RANGE", "1y")
+        default_factory=lambda: os.environ.get("MARKET_HISTORY_RANGE", "5y")
     )
 
     # Replay configuration. With real daily bars each bar is one trading day.
@@ -91,11 +98,18 @@ class Settings:
         default_factory=lambda: os.environ.get("SIM_AUTOSTART", "1").lower()
         not in ("0", "false", "no")
     )
+    # A self-request counts as inbound traffic on Render, so one successful wake
+    # can keep a single free service alive without an external scheduler.
+    self_keepalive_seconds: float = field(
+        default_factory=lambda: _env_float("SELF_KEEPALIVE_SECONDS", 240.0)
+    )
 
     def as_public_dict(self) -> dict:
         return {
             "starting_balance": self.starting_balance,
             "universe": list(self.universe),
+            "stock_universe": list(self.stock_universe),
+            "etf_universe": list(self.etf_universe),
             "fee_bps": self.fee_bps,
             "borrow_rate_annual": self.borrow_rate_annual,
             "max_position_pct": self.max_position_pct,
@@ -112,4 +126,5 @@ class Settings:
             "default_mode": self.default_mode,
             "live_poll_seconds": self.live_poll_seconds,
             "live_decision_seconds": self.live_decision_seconds,
+            "self_keepalive_seconds": self.self_keepalive_seconds,
         }

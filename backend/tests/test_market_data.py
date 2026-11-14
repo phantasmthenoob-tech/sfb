@@ -123,7 +123,9 @@ def test_repository_merge_is_idempotent(tmp_path):
 
 
 def _engine(tmp_path, monkeypatch, fetches: list[DailyDataset]) -> SimulationEngine:
-    settings = make_settings(tmp_path, data_source="yahoo", data_refresh_hours=24)
+    settings = make_settings(
+        tmp_path, data_source="yahoo", data_refresh_hours=24, universe=TICKERS
+    )
     db = Database(settings.db_path)
     repo = Repository(db)
 
@@ -171,6 +173,7 @@ def test_daily_refresh_appends_new_sessions(tmp_path, monkeypatch):
         last_bar_date=engine.data_info["last_bar_date"],
         tickers=engine.settings.universe,
         bar_count=engine.total_bars,
+        history_range=engine.settings.history_range,
     )
     engine.refresh_data_if_due()
 

@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS predictions (
     price REAL NOT NULL DEFAULT 0,
     rationale TEXT NOT NULL DEFAULT '',
     sim_time TEXT NOT NULL,
-    bar_index INTEGER NOT NULL DEFAULT 0
+    bar_index INTEGER NOT NULL DEFAULT 0,
+    settled_bar_index INTEGER,
+    actual_pct REAL,
+    actual_price REAL,
+    outcome TEXT
 );
 
 CREATE TABLE IF NOT EXISTS market_data (
@@ -113,6 +117,9 @@ CREATE TABLE IF NOT EXISTS simulation_runs (
     end_date TEXT NOT NULL,
     cursor INTEGER NOT NULL,
     total_bars INTEGER NOT NULL,
+    replay_preset TEXT NOT NULL DEFAULT 'all',
+    range_start_date TEXT,
+    range_end_date TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -123,7 +130,8 @@ CREATE TABLE IF NOT EXISTS data_cache (
     fetched_at TEXT NOT NULL,
     last_bar_date TEXT NOT NULL,
     tickers TEXT NOT NULL,
-    bar_count INTEGER NOT NULL
+    bar_count INTEGER NOT NULL,
+    history_range TEXT NOT NULL DEFAULT '1y'
 );
 
 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -172,6 +180,15 @@ class Database:
                 self._conn.execute(
                     "ALTER TABLE simulation_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'replay'"
                 )
+            for name, definition in (
+                ("replay_preset", "TEXT NOT NULL DEFAULT 'all'"),
+                ("range_start_date", "TEXT"),
+                ("range_end_date", "TEXT"),
+            ):
+                if name not in columns:
+                    self._conn.execute(
+                        f"ALTER TABLE simulation_runs ADD COLUMN {name} {definition}"
+                    )
             prediction_columns = {
                 row["name"]
                 for row in self._conn.execute("PRAGMA table_info(predictions)")
@@ -187,6 +204,28 @@ class Database:
             if "price" not in prediction_columns:
                 self._conn.execute(
                     "ALTER TABLE predictions ADD COLUMN price REAL NOT NULL DEFAULT 0"
+                )
+            for name, definition in (
+                ("settled_bar_index", "INTEGER"),
+                ("actual_pct", "REAL"),
+                ("actual_price", "REAL"),
+                ("outcome", "TEXT"),
+            ):
+                if name not in prediction_columns:
+                    self._conn.execute(
+                        f"ALTER TABLE predictions ADD COLUMN {name} {definition}"
+                    )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_predictions_settlement "
+                "ON predictions (settled_bar_index)"
+            )
+            cache_columns = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(data_cache)")
+            }
+            if "history_range" not in cache_columns:
+                self._conn.execute(
+                    "ALTER TABLE data_cache ADD COLUMN history_range TEXT NOT NULL DEFAULT '1y'"
                 )
             self._conn.commit()
 

@@ -3,22 +3,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
+import urllib.request
 from datetime import date, datetime, timezone
 
 from ..competition.leaderboard import build_leaderboard, build_portfolio_view
 from ..competition.manager import CompetitionManager
-from ..config import SPEED_OPTIONS, Settings
+from ..config import FORECAST_HORIZON_SESSIONS, SPEED_OPTIONS, Settings
 from ..database.repositories import Repository
 from ..market import data_provider
 from ..market.data_processor import quote_payload
 from ..market.live_provider import LiveSnapshot, fetch_live_quotes
 from ..market.news_provider import generate_news, generate_news_for_dates
+from ..market.universe import profile_for, universe_payload
 from ..market.yahoo_provider import DailyDataset, fetch_daily_bars, last_completed_session
 from ..trading.exchange import Exchange
 from ..trading.order_manager import OrderManager
 from .event_manager import EventManager
+from .replay_ranges import DEFAULT_RANGE, RANGE_IDS, range_options, resolve_replay_range
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,9 @@ class SimulationEngine:
         self.timeline: list[dict] = []
         self.total_bars = 0
         self.cursor = 0
+        self.range_preset = DEFAULT_RANGE
+        self.range_start = 0
+        self.range_end = 0
         self.speed = settings.default_speed
         self.status = STATUS_PAUSED
         self.mode = settings.default_mode if settings.default_mode in MODES else MODE_REPLAY
@@ -57,6 +64,28 @@ class SimulationEngine:
         self._live_lock = threading.RLock()
         self._task: asyncio.Task | None = None
         self._shutdown = False
+
+    @staticmethod
+    def _keepalive_url() -> str | None:
+        """The public health URL used to keep a Render free instance awake."""
+        explicit = os.environ.get("KEEPALIVE_URL", "").strip()
+        if explicit:
+            return explicit
+        base = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+        if base:
+            return base.rstrip("/") + "/api/health"
+        return None
+
+    @classmethod
+    def _ping_self(cls) -> None:
+        url = cls._keepalive_url()
+        if not url:
+            return
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                response.read(1)
+        except Exception as exc:  # pragma: no cover - network failures are expected
+            logger.info("Self keep-alive request failed: %s", exc)
 
     def _empty_live_info(self) -> dict:
         return {
@@ -85,12 +114,15 @@ class SimulationEngine:
         if run and str(run.get("mode") or "").lower() in MODES:
             self.mode = str(run["mode"]).lower()
 
+        saved_preset = str((run or {}).get("replay_preset") or DEFAULT_RANGE)
+        self._apply_replay_range(saved_preset if saved_preset in RANGE_IDS else DEFAULT_RANGE)
+
         reset = replaced or run is None or (
             self.mode == MODE_REPLAY and int(run["total_bars"]) != self.total_bars
         )
         if reset:
             self.repo.reset_accounts(self.settings, now)
-            self.cursor = 0 if self.mode == MODE_REPLAY else self.total_bars - 1
+            self.cursor = self.range_start if self.mode == MODE_REPLAY else self.total_bars - 1
             self.speed = self.settings.default_speed
             self.status = (
                 STATUS_RUNNING
@@ -99,10 +131,11 @@ class SimulationEngine:
             )
             self.last_prices = self.repo.prices_at(self.cursor)
             self._take_snapshots(self.timeline[self.cursor]["ts"])
+            self.settle_forecasts()
             self._persist()
             return
 
-        self.cursor = min(int(run["cursor"]), self.total_bars - 1)
+        self.cursor = min(max(int(run["cursor"]), self.range_start), self.range_end)
         self.speed = int(run["speed"]) if int(run["speed"]) in SPEED_OPTIONS else self.settings.default_speed
         self.status = run["status"]
         if self.mode == MODE_LIVE:
@@ -113,21 +146,50 @@ class SimulationEngine:
         manual = self.repo.get_manual_portfolio()
         if manual and not self.repo.latest_snapshot(manual["id"]):
             self._take_snapshots(self.timeline[self.cursor]["ts"])
+        self.settle_forecasts()
+
+    def _cache_covers_universe(self, cache: dict | None) -> bool:
+        """Whether a cache was built for every ticker currently configured."""
+        if not cache:
+            return False
+        cached = {
+            ticker.strip().upper()
+            for ticker in str(cache.get("tickers") or "").split(",")
+            if ticker.strip()
+        }
+        return set(self.settings.universe).issubset(cached)
+
+    def _cache_matches_range(self, cache: dict | None) -> bool:
+        """Whether a Yahoo cache was built for the configured history range."""
+        if not cache or self.settings.data_source != "yahoo":
+            return True
+        return str(cache.get("history_range") or "1y") == self.settings.history_range
 
     def _ensure_market_data(self) -> bool:
         """Load cached prices or refresh them. Returns True if the dataset changed."""
         cache = self.repo.get_data_cache()
         summary = self.repo.market_summary()
         has_data = summary["bar_count"] > 0
+        cache_matches_universe = self._cache_covers_universe(cache)
+        cache_matches_range = self._cache_matches_range(cache)
 
         if self.settings.data_source != "yahoo":
-            if has_data and cache and cache["source"] == "synthetic":
+            if (
+                has_data
+                and cache
+                and cache["source"] == "synthetic"
+                and cache_matches_universe
+            ):
                 self._set_data_info_from_cache(cache, summary)
                 return False
             return self._seed_synthetic()
 
         if has_data and cache and cache["source"] == "yahoo":
-            if self._cache_age_hours(cache) < self.settings.data_refresh_hours:
+            if (
+                self._cache_age_hours(cache) < self.settings.data_refresh_hours
+                and cache_matches_universe
+                and cache_matches_range
+            ):
                 self._set_data_info_from_cache(cache, summary)
                 return False
             try:
@@ -138,6 +200,11 @@ class SimulationEngine:
                 logger.warning("Yahoo Finance refresh failed (%s); using cached daily bars", exc)
                 self._set_data_info_from_cache(cache, summary, stale=True)
                 return False
+            if not cache_matches_universe or not cache_matches_range:
+                # Adding tickers or changing the lookback changes the shared
+                # calendar, so a merge would leave gaps in the new series.
+                self._replace_dataset(dataset)
+                return True
             appended = self._append_dataset(dataset)
             self._store_cache(dataset)
             self._set_data_info_from_cache(self.repo.get_data_cache(), self.repo.market_summary())
@@ -180,6 +247,7 @@ class SimulationEngine:
             last_bar_date=window.end_date,
             tickers=self.settings.universe,
             bar_count=len(bars),
+            history_range="synthetic",
         )
         self._set_data_info_from_cache(self.repo.get_data_cache(), self.repo.market_summary())
         logger.info(
@@ -229,6 +297,7 @@ class SimulationEngine:
             last_bar_date=dataset.last_bar_date,
             tickers=dataset.tickers,
             bar_count=summary["bar_count"],
+            history_range=self.settings.history_range,
         )
 
     def _set_data_info_from_cache(
@@ -278,6 +347,20 @@ class SimulationEngine:
                 self.repo.get_data_cache(), self.repo.market_summary()
             )
         payload = dict(self.data_info)
+        summary = self.repo.market_summary()
+        payload["recording"] = {
+            "enabled": True,
+            "bars": summary.get("bar_count", 0),
+            "sessions": summary.get("sessions", 0),
+            "tickers": summary.get("tickers", 0),
+            "first_date": summary.get("start_date"),
+            "last_date": summary.get("end_date"),
+            "last_recorded_at": summary.get("last_recorded_at"),
+            "note": (
+                "Completed bars are persisted in SQLite; live polls continuously "
+                "update the current session. Headlines are simulated."
+            ),
+        }
         if self.mode == MODE_LIVE:
             payload["note"] = (
                 f"Live quotes from Yahoo Finance, polled every "
@@ -293,6 +376,8 @@ class SimulationEngine:
             return
         cache = self.repo.get_data_cache()
         if not cache or cache["source"] != "yahoo":
+            return
+        if not self._cache_matches_range(cache):
             return
         if self._cache_age_hours(cache) < self.settings.data_refresh_hours:
             return
@@ -326,7 +411,8 @@ class SimulationEngine:
     def reset(self) -> dict:
         now = datetime.now(timezone.utc).isoformat()
         self.repo.reset_accounts(self.settings, now)
-        self.cursor = 0 if self.mode == MODE_REPLAY else self.total_bars - 1
+        self.competition.reset_history()
+        self.cursor = self.range_start if self.mode == MODE_REPLAY else self.total_bars - 1
         self.status = STATUS_PAUSED if self.mode == MODE_REPLAY else STATUS_RUNNING
         self.last_prices = self.repo.prices_at(self.cursor)
         self._take_snapshots(self.timeline[self.cursor]["ts"])
@@ -348,6 +434,7 @@ class SimulationEngine:
         now = datetime.now(timezone.utc).isoformat()
         self.repo.cancel_pending_orders("mode_switch")
         self.repo.reset_accounts(self.settings, now)
+        self.competition.reset_history()
         self.mode = mode
         self.live_quotes = {}
         self._last_live_decision = 0.0
@@ -359,11 +446,11 @@ class SimulationEngine:
                 if last_session > last_completed_session().isoformat():
                     self.repo.delete_session(last_session)
                     self._reload_timeline()
-            self.cursor = 0
+            self.cursor = self.range_start
             self.status = STATUS_PAUSED
-            self.last_prices = self.repo.prices_at(0)
+            self.last_prices = self.repo.prices_at(self.cursor)
             self.live_info = self._empty_live_info()
-            self._take_snapshots(self.timeline[0]["ts"])
+            self._take_snapshots(self.timeline[self.cursor]["ts"])
         else:
             self._reload_timeline()
             self.cursor = self.total_bars - 1
@@ -387,6 +474,30 @@ class SimulationEngine:
         self._persist()
         return self.status_payload()
 
+    def _apply_replay_range(self, preset: str) -> None:
+        resolved = resolve_replay_range(self.timeline, preset)
+        self.range_preset = resolved.preset
+        self.range_start = resolved.start_bar
+        self.range_end = resolved.end_bar
+
+    def set_replay_range(self, preset: str) -> dict:
+        """Reset trading and replay only the selected date window."""
+        if preset not in RANGE_IDS:
+            raise ValueError(f"Range must be one of {list(RANGE_IDS)}")
+        if self.mode != MODE_REPLAY:
+            raise ValueError("Replay ranges can only be selected in replay mode")
+        now = datetime.now(timezone.utc).isoformat()
+        self._apply_replay_range(preset)
+        self.repo.reset_accounts(self.settings, now)
+        self.competition.reset_history()
+        self.cursor = self.range_start
+        self.status = STATUS_PAUSED
+        self.last_prices = self.repo.prices_at(self.cursor)
+        self._take_snapshots(self.timeline[self.cursor]["ts"])
+        self._persist()
+        self._publish()
+        return self.status_payload()
+
     @property
     def interval_seconds(self) -> float:
         return max(0.01, self.settings.bar_interval_seconds / max(1, self.speed))
@@ -396,7 +507,7 @@ class SimulationEngine:
         """Advance exactly one replay bar. Returns True when time moved."""
         if self.mode != MODE_REPLAY or self.status != STATUS_RUNNING:
             return False
-        if self.cursor >= self.total_bars - 1:
+        if self.cursor >= self.range_end:
             self._complete()
             return False
 
@@ -411,6 +522,7 @@ class SimulationEngine:
         previous_session = self.timeline[self.cursor]["session_date"]
         self.cursor = next_index
         self.last_prices = self.repo.prices_at(next_index)
+        self.settle_forecasts()
 
         if bar["session_date"] != previous_session:
             for portfolio in self.repo.list_portfolios():
@@ -418,7 +530,7 @@ class SimulationEngine:
 
         if (
             next_index % self.settings.agent_decision_every == 0
-            and next_index < self.total_bars - 1
+            and next_index < self.range_end
         ):
             self.competition.run_decisions(
                 bar_index=next_index, sim_time=sim_time, prices=self.last_prices
@@ -426,7 +538,7 @@ class SimulationEngine:
 
         self._take_snapshots(sim_time)
         self._persist()
-        if next_index >= self.total_bars - 1:
+        if next_index >= self.range_end:
             self._complete()
         return True
 
@@ -484,6 +596,7 @@ class SimulationEngine:
                 >= self.settings.live_decision_seconds
             ):
                 self._last_live_decision = time.monotonic()
+                self.competition.reset_history()
                 self.competition.run_decisions(
                     bar_index=self.cursor,
                     sim_time=sim_time,
@@ -491,6 +604,7 @@ class SimulationEngine:
                 )
                 self.live_info["last_decision"] = datetime.now(timezone.utc).isoformat()
             self._take_snapshots(sim_time)
+            self.settle_forecasts()
 
         self._last_live_poll = time.monotonic()
         self._persist()
@@ -593,12 +707,17 @@ class SimulationEngine:
         return True
 
     def _reload_timeline(self) -> None:
+        previous_total = self.total_bars
         self.timeline = self.repo.timeline()
         self.total_bars = len(self.timeline)
+        if self.range_preset == "all" and self.range_end >= max(0, previous_total - 1):
+            self.range_end = max(0, self.total_bars - 1)
+        self.range_end = min(self.range_end, max(0, self.total_bars - 1))
+        self.range_start = min(self.range_start, self.range_end)
         if self.mode == MODE_LIVE:
             self.cursor = max(0, self.total_bars - 1)
-        elif self.cursor >= self.total_bars:
-            self.cursor = max(0, self.total_bars - 1)
+        elif self.cursor < self.range_start or self.cursor > self.range_end:
+            self.cursor = self.range_start
         self.last_prices = self.repo.prices_at(self.cursor) or self.last_prices
         self._persist()
 
@@ -613,6 +732,7 @@ class SimulationEngine:
     async def run_loop(self) -> None:
         last_publish = 0.0
         last_data_check = time.monotonic()
+        last_keepalive = time.monotonic()
         while not self._shutdown:
             if self.mode == MODE_LIVE:
                 await asyncio.sleep(1.0)
@@ -647,6 +767,14 @@ class SimulationEngine:
                 except Exception:  # pragma: no cover - network failures are non-fatal
                     logger.warning("Daily market data refresh failed", exc_info=True)
 
+            if (
+                self.settings.self_keepalive_seconds > 0
+                and time.monotonic() - last_keepalive
+                >= self.settings.self_keepalive_seconds
+            ):
+                last_keepalive = time.monotonic()
+                await asyncio.to_thread(self._ping_self)
+
     def shutdown(self) -> None:
         self._shutdown = True
         if self._task:
@@ -663,6 +791,9 @@ class SimulationEngine:
                 "progress_pct": 0.0,
             }
         bar = self.timeline[self.cursor]
+        range_start = self.timeline[self.range_start]
+        range_end = self.timeline[self.range_end]
+        range_bars = max(1, self.range_end - self.range_start + 1)
         payload = {
             "status": self.status,
             "mode": self.mode,
@@ -672,9 +803,18 @@ class SimulationEngine:
             "total_bars": self.total_bars,
             "sim_time": bar["ts"],
             "session_date": bar["session_date"],
-            "start_date": self.timeline[0]["session_date"],
-            "end_date": self.timeline[-1]["session_date"],
-            "progress_pct": round((self.cursor + 1) / self.total_bars * 100.0, 1),
+            "start_date": range_start["session_date"],
+            "end_date": range_end["session_date"],
+            "data_start_date": self.timeline[0]["session_date"],
+            "data_end_date": self.timeline[-1]["session_date"],
+            "progress_pct": round(
+                (self.cursor - self.range_start + 1) / range_bars * 100.0, 1
+            ),
+            "replay_preset": self.range_preset,
+            "range_start_bar": self.range_start,
+            "range_end_bar": self.range_end,
+            "range_bars": range_bars,
+            "range_options": range_options(),
             "decision_every_bars": self.settings.agent_decision_every,
             "autostart": self.settings.autostart,
         }
@@ -699,11 +839,17 @@ class SimulationEngine:
         if not self.timeline:
             return []
         previous = self.reference_prices()
+        current = {row["ticker"]: row for row in self.repo.bars_at(self.cursor)}
         quotes = []
         for ticker in self.settings.universe:
-            bar = self.repo.bar(ticker, self.cursor)
-            if bar:
-                quotes.append(quote_payload(ticker, bar, previous.get(ticker)))
+            bar = current.get(ticker)
+            if not bar:
+                continue
+            quote = quote_payload(ticker, bar, previous.get(ticker))
+            profile = profile_for(ticker)
+            if profile:
+                quote.update(profile.as_dict())
+            quotes.append(quote)
         return quotes
 
     @staticmethod
@@ -714,7 +860,7 @@ class SimulationEngine:
             "momentum_lookback_sessions": 10,
             "news_lookback_sessions": 5,
             "volatility_lookback_sessions": 20,
-            "forecast_horizon_sessions": 5,
+            "forecast_horizon_sessions": FORECAST_HORIZON_SESSIONS,
             "max_bars_loaded": 120,
             "note": "Uses only bars and headlines at or before the current simulation time.",
         }
@@ -743,6 +889,29 @@ class SimulationEngine:
             "sim_time": sim_time,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def settle_forecasts(self) -> int:
+        """Settle every call whose five-session horizon has been reached."""
+        if not self.timeline:
+            return 0
+        return self.repo.settle_predictions(self.cursor, FORECAST_HORIZON_SESSIONS)
+
+    def forecast_scorecard(self) -> dict:
+        """Return settled accuracy stats after catching up any matured calls."""
+        if not self.timeline:
+            return {
+                "horizon_sessions": FORECAST_HORIZON_SESSIONS,
+                "settled_calls": 0,
+                "open_calls": 0,
+                "agents": [],
+                "sim_time": None,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        self.settle_forecasts()
+        payload = self.repo.forecast_scorecard(FORECAST_HORIZON_SESSIONS)
+        payload["sim_time"] = self.timeline[self.cursor]["ts"]
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return payload
 
     def forecasts_payload(self) -> list[dict]:
         """Each AI's top five expected moves, largest first, for the dashboard."""
@@ -787,13 +956,14 @@ class SimulationEngine:
             build_portfolio_view(self.repo, manual_row, prices) if manual_row else None
         )
         indices = data_provider.index_levels(
-            prices, self.reference_prices(), self.settings.universe
+            prices, self.reference_prices(), self.settings.stock_universe
         )
         return {
             "type": "snapshot",
             "simulation": status,
             "quotes": quotes,
             "indices": indices,
+            "universe_meta": universe_payload(),
             "forecasts": self.forecasts_payload(),
             "forecast_meta": self.forecast_meta(),
             "leaderboard": leaderboard,
@@ -830,5 +1000,8 @@ class SimulationEngine:
             end_date=self.timeline[-1]["session_date"],
             cursor=self.cursor,
             total_bars=self.total_bars,
+            replay_preset=self.range_preset,
+            range_start_date=self.timeline[self.range_start]["session_date"],
+            range_end_date=self.timeline[self.range_end]["session_date"],
             updated_at=datetime.now(timezone.utc).isoformat(),
         )

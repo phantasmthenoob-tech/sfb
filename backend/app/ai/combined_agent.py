@@ -9,14 +9,15 @@ from ..trading.portfolio import PortfolioState
 
 class CombinedAgent(BaseAgent):
     model_type = "combined"
-    entry_threshold = 0.26
-    exit_threshold = 0.03
+    entry_threshold = 0.45
+    exit_threshold = -0.05
     max_entries = 3
     target_position_pct = 0.13
     target_short_pct = 0.08
+    allow_short = False
     sentiment_window_bars = 5  # one trading week of daily headlines
-    price_weight = 0.6
-    news_weight = 0.4
+    price_weight = 0.9
+    news_weight = 0.1
 
     def evaluate(self, context: MarketContext, state: PortfolioState) -> list[Signal]:
         signals: list[Signal] = []
@@ -25,7 +26,9 @@ class CombinedAgent(BaseAgent):
             technical = technical_score(context.bars[ticker])
             if technical is None:
                 continue
-            sentiment = sentiment_score(context.news, ticker, min_bar)
+            sentiment = context.sentiments.get(ticker) or sentiment_score(
+                context.news, ticker, min_bar
+            )
             news_component = sentiment["score"] * 1.5 if sentiment["count"] else 0.0
             count = sentiment["count"]
             noun = "headline" if count == 1 else "headlines"

@@ -1,6 +1,7 @@
 import { money, signedPct, toneClass } from "../lib/format";
 import type { Snapshot } from "../types";
 import { Leaderboard } from "./Leaderboard";
+import { SectorPerformance } from "./SectorPerformance";
 import { Empty, Panel } from "./ui";
 
 export function Overview({ snapshot }: { snapshot: Snapshot }) {
@@ -8,25 +9,32 @@ export function Overview({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <div className="overview">
-      <Leaderboard entries={leaderboard} />
+      <div className="stack">
+        <Leaderboard entries={leaderboard} />
+        <SectorPerformance snapshot={snapshot} />
+      </div>
 
       <div className="stack">
-        <Panel title="Markets">
+        <Panel title="Markets" aside={<span className="caption">Stocks and benchmarks</span>}>
           {quotes.length === 0 ? (
             <Empty>Waiting for prices…</Empty>
           ) : (
             <ul className="quote-list">
-              {quotes.map((quote) => (
-                <li key={quote.ticker}>
-                  <span className="ticker">{quote.ticker}</span>
-                  <span className="mono">{money(quote.price)}</span>
-                  <span className={`mono ${toneClass(quote.change_pct)}`}>
-                    {signedPct(quote.change_pct)}
-                  </span>
-                </li>
-              ))}
+              {quotes
+                .filter((quote) => (quote.kind ?? "stock") === "stock")
+                .slice(0, 6)
+                .map((quote) => (
+                  <li key={quote.ticker}>
+                    <span className="ticker">{quote.ticker}</span>
+                    <span className="mono">{money(quote.price)}</span>
+                    <span className={`mono ${toneClass(quote.change_pct)}`}>
+                      {signedPct(quote.change_pct)}
+                    </span>
+                  </li>
+                ))}
             </ul>
           )}
+          <p className="data-note">Open Markets for all 120 stocks, sector filters and 8 ETF benchmarks.</p>
         </Panel>
 
         <Panel title="Your account">

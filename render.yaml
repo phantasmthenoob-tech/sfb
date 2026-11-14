@@ -22,12 +22,15 @@ services:
       - key: MARKET_DATA_REFRESH_HOURS
         value: "24"
       - key: MARKET_HISTORY_RANGE
-        value: "1y"
+        value: "5y"
       # Live mode cadence.
       - key: LIVE_POLL_SECONDS
         value: "60"
       - key: LIVE_DECISION_SECONDS
         value: "300"
+      # The backend pings RENDER_EXTERNAL_URL/api/health while awake.
+      - key: SELF_KEEPALIVE_SECONDS
+        value: "240"
       # Comma-separated exact browser origins, e.g.
       # https://my-dashboard.onrender.com,https://preview.example.com
       # Set this in the Render dashboard after the static site URL is known.

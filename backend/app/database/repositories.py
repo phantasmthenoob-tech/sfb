@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from ..config import Settings
+from ..config import FORECAST_HORIZON_SESSIONS, Settings
 from ..trading.accounting import round_money
 from ..trading.portfolio import Holding, PortfolioState
 from .database import Database
@@ -56,12 +56,17 @@ class Repository:
         cursor: int,
         total_bars: int,
         updated_at: str,
+        replay_preset: str = "all",
+        range_start_date: str | None = None,
+        range_end_date: str | None = None,
     ) -> None:
         with self.db.transaction() as conn:
             conn.execute(
                 """
-                INSERT INTO simulation_runs (id, status, mode, speed, start_date, end_date, cursor, total_bars, updated_at)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO simulation_runs
+                    (id, status, mode, speed, start_date, end_date, cursor, total_bars,
+                     replay_preset, range_start_date, range_end_date, updated_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     status = excluded.status,
                     mode = excluded.mode,
@@ -70,9 +75,24 @@ class Repository:
                     end_date = excluded.end_date,
                     cursor = excluded.cursor,
                     total_bars = excluded.total_bars,
+                    replay_preset = excluded.replay_preset,
+                    range_start_date = excluded.range_start_date,
+                    range_end_date = excluded.range_end_date,
                     updated_at = excluded.updated_at
                 """,
-                (status, mode, speed, start_date, end_date, cursor, total_bars, updated_at),
+                (
+                    status,
+                    mode,
+                    speed,
+                    start_date,
+                    end_date,
+                    cursor,
+                    total_bars,
+                    replay_preset,
+                    range_start_date,
+                    range_end_date,
+                    updated_at,
+                ),
             )
 
     # --------------------------------------------------------------- accounts
@@ -396,6 +416,130 @@ class Repository:
             (bar_index,),
         )
 
+    def settle_predictions(
+        self, up_to_bar: int, horizon: int = FORECAST_HORIZON_SESSIONS
+    ) -> int:
+        """Grade matured calls against the close exactly ``horizon`` bars later."""
+        rows = self.db.query(
+            """
+            SELECT pr.id, pr.ticker, pr.bar_index, pr.price, pr.direction,
+                   target.close AS target_close, target.bar_index AS target_bar
+            FROM predictions pr
+            JOIN market_data target
+              ON target.ticker = pr.ticker
+             AND target.bar_index = pr.bar_index + ?
+            WHERE pr.settled_bar_index IS NULL
+              AND pr.bar_index + ? <= ?
+            """,
+            (horizon, horizon, up_to_bar),
+        )
+        if not rows:
+            return 0
+
+        updates: list[tuple[float, float, str, int, int]] = []
+        for row in rows:
+            base = float(row["price"] or 0.0)
+            if base <= 0:
+                source = self.bar(row["ticker"], int(row["bar_index"]))
+                base = float(source["close"]) if source else 0.0
+            actual_price = float(row["target_close"] or 0.0)
+            if base <= 0 or actual_price <= 0:
+                continue
+
+            actual_pct = round((actual_price / base - 1.0) * 100.0, 2)
+            direction = str(row["direction"]).upper()
+            if direction == "UP":
+                hit = actual_pct > 0
+            elif direction == "DOWN":
+                hit = actual_pct < 0
+            else:
+                hit = abs(actual_pct) <= 0.05
+            updates.append(
+                (
+                    actual_pct,
+                    round(actual_price, 2),
+                    "HIT" if hit else "MISS",
+                    int(row["target_bar"]),
+                    int(row["id"]),
+                )
+            )
+
+        if not updates:
+            return 0
+        with self.db.transaction() as conn:
+            conn.executemany(
+                """
+                UPDATE predictions
+                SET actual_pct = ?, actual_price = ?, outcome = ?, settled_bar_index = ?
+                WHERE id = ?
+                """,
+                updates,
+            )
+        return len(updates)
+
+    def forecast_scorecard(self, horizon: int = FORECAST_HORIZON_SESSIONS) -> dict:
+        """Directional hit rate and absolute error for every agent's settled calls."""
+        rows = self.db.query(
+            """
+            SELECT a.id AS agent_id, a.name AS agent_name, a.model_type,
+                   COUNT(pr.id) AS settled_calls,
+                   COALESCE(SUM(CASE WHEN pr.outcome = 'HIT' THEN 1 ELSE 0 END), 0) AS hits,
+                   AVG(ABS(pr.actual_pct - pr.expected_pct)) AS avg_abs_error_pct,
+                   AVG(ABS(pr.actual_pct)) AS avg_abs_move_pct
+            FROM agents a
+            LEFT JOIN predictions pr
+              ON pr.agent_id = a.id AND pr.settled_bar_index IS NOT NULL
+            GROUP BY a.id, a.name, a.model_type
+            ORDER BY a.id
+            """
+        )
+        open_rows = self.db.query(
+            """
+            SELECT agent_id, COUNT(*) AS n
+            FROM predictions
+            WHERE settled_bar_index IS NULL
+            GROUP BY agent_id
+            """
+        )
+        open_by_agent = {int(row["agent_id"]): int(row["n"]) for row in open_rows}
+
+        agents: list[dict] = []
+        total_settled = 0
+        total_open = 0
+        for row in rows:
+            settled = int(row["settled_calls"] or 0)
+            hits = int(row["hits"] or 0)
+            open_calls = open_by_agent.get(int(row["agent_id"]), 0)
+            total_settled += settled
+            total_open += open_calls
+            agents.append(
+                {
+                    "agent_id": row["agent_id"],
+                    "agent_name": row["agent_name"],
+                    "model_type": row["model_type"],
+                    "settled_calls": settled,
+                    "hits": hits,
+                    "hit_rate_pct": round(hits / settled * 100.0, 1) if settled else None,
+                    "avg_abs_error_pct": (
+                        round(float(row["avg_abs_error_pct"]), 2)
+                        if row["avg_abs_error_pct"] is not None
+                        else None
+                    ),
+                    "avg_abs_move_pct": (
+                        round(float(row["avg_abs_move_pct"]), 2)
+                        if row["avg_abs_move_pct"] is not None
+                        else None
+                    ),
+                    "open_calls": open_calls,
+                }
+            )
+        return {
+            "horizon_sessions": horizon,
+            "settled_calls": total_settled,
+            "open_calls": total_open,
+            "agents": agents,
+        }
+
     def list_predictions(self, agent_id: int | None = None, limit: int = 50) -> list[dict]:
         if agent_id is None:
             return self.db.query(
@@ -456,21 +600,32 @@ class Repository:
         last_bar_date: str,
         tickers: Iterable[str],
         bar_count: int,
+        history_range: str = "1y",
     ) -> None:
         with self.db.transaction() as conn:
             conn.execute(
                 """
-                INSERT INTO data_cache (id, source, interval, fetched_at, last_bar_date, tickers, bar_count)
-                VALUES (1, ?, ?, ?, ?, ?, ?)
+                INSERT INTO data_cache
+                    (id, source, interval, fetched_at, last_bar_date, tickers, bar_count, history_range)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     source = excluded.source,
                     interval = excluded.interval,
                     fetched_at = excluded.fetched_at,
                     last_bar_date = excluded.last_bar_date,
                     tickers = excluded.tickers,
-                    bar_count = excluded.bar_count
+                    bar_count = excluded.bar_count,
+                    history_range = excluded.history_range
                 """,
-                (source, interval, fetched_at, last_bar_date, ",".join(tickers), bar_count),
+                (
+                    source,
+                    interval,
+                    fetched_at,
+                    last_bar_date,
+                    ",".join(tickers),
+                    bar_count,
+                    history_range,
+                ),
             )
 
     def market_summary(self) -> dict:
@@ -480,6 +635,7 @@ class Repository:
                    COUNT(DISTINCT session_date) AS sessions,
                    MIN(session_date) AS start_date,
                    MAX(session_date) AS end_date,
+                   MAX(ts) AS last_recorded_at,
                    COUNT(DISTINCT ticker) AS tickers
             FROM market_data
             """
@@ -489,6 +645,7 @@ class Repository:
             "sessions": 0,
             "start_date": None,
             "end_date": None,
+            "last_recorded_at": None,
             "tickers": 0,
         }
 
@@ -642,6 +799,14 @@ class Repository:
         return self.db.query(
             "SELECT * FROM market_data WHERE ticker = ? AND bar_index BETWEEN ? AND ? ORDER BY bar_index",
             (ticker, from_bar, to_bar),
+        )
+
+    def bars_window(self, from_bar: int, to_bar: int) -> list[dict]:
+        """All tickers in a bar window, for one-query correlation analysis."""
+        return self.db.query(
+            "SELECT ticker, bar_index, close FROM market_data"
+            " WHERE bar_index BETWEEN ? AND ? ORDER BY ticker, bar_index",
+            (from_bar, to_bar),
         )
 
     def prices_at(self, bar_index: int) -> dict[str, float]:

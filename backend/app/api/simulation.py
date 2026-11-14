@@ -19,6 +19,10 @@ class ModeRequest(BaseModel):
     mode: str
 
 
+class ReplayRangeRequest(BaseModel):
+    preset: str
+
+
 @router.get("/status")
 def status(engine: SimulationEngine = Depends(get_engine)) -> dict:
     return engine.status_payload()
@@ -47,6 +51,17 @@ def pause(engine: SimulationEngine = Depends(get_engine)) -> dict:
 @router.post("/reset")
 def reset(engine: SimulationEngine = Depends(get_engine)) -> dict:
     engine.reset()
+    return {"simulation": engine.status_payload(), "snapshot": engine.snapshot()}
+
+
+@router.post("/range")
+def set_replay_range(
+    payload: ReplayRangeRequest, engine: SimulationEngine = Depends(get_engine)
+) -> dict:
+    try:
+        engine.set_replay_range(payload.preset)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"simulation": engine.status_payload(), "snapshot": engine.snapshot()}
 
 

@@ -1,7 +1,13 @@
-import { useState } from "react";
-import { apiPost } from "../api/client";
+import { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../api/client";
 import { money, signedMoney, signedPct, simDate, toneClass } from "../lib/format";
-import type { AgentForecast, ForecastCall, ForecastMeta, Snapshot } from "../types";
+import type {
+  AgentForecast,
+  ForecastCall,
+  ForecastMeta,
+  ForecastScorecard,
+  Snapshot,
+} from "../types";
 import { Empty, Panel } from "./ui";
 
 const DEFAULT_META: ForecastMeta = {
@@ -32,6 +38,62 @@ function callName(direction: ForecastCall["direction"]): string {
   return "flat";
 }
 
+function scorecardPct(value: number | null): string {
+  return value === null ? "—" : `${value.toFixed(1)}%`;
+}
+
+function scorecardError(value: number | null): string {
+  return value === null ? "—" : `${value.toFixed(2)} pp`;
+}
+
+function ForecastScorecardPanel({ scorecard }: { scorecard: ForecastScorecard }) {
+  return (
+    <Panel
+      title="Forecast accuracy"
+      aside={<span className="caption">{scorecard.horizon_sessions}-session settlement</span>}
+    >
+      {scorecard.settled_calls === 0 && (
+        <p className="caption scorecard-empty">
+          No calls have reached their five-session horizon yet. The first grades appear
+          once the clock reaches the target bar.
+        </p>
+      )}
+      <div className="scorecard-grid">
+        {scorecard.agents.map((agent) => (
+          <div className="scorecard-card" key={agent.agent_id}>
+            <div className="scorecard-head">
+              <strong>{agent.agent_name}</strong>
+              <span className="caption">{agent.model_type}</span>
+            </div>
+            <div className="scorecard-metrics">
+              <div className="scorecard-metric">
+                <span className="scorecard-value mono">
+                  {scorecardPct(agent.hit_rate_pct)}
+                </span>
+                <span className="caption">hit rate</span>
+              </div>
+              <div className="scorecard-metric">
+                <span className="scorecard-value mono">
+                  {scorecardError(agent.avg_abs_error_pct)}
+                </span>
+                <span className="caption">avg error</span>
+              </div>
+            </div>
+            <p className="caption">
+              {agent.settled_calls} settled · {agent.open_calls} open
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="data-note">
+        A hit means the actual five-session move matched the call&apos;s direction.
+        Average error is the mean absolute difference between expected and actual move,
+        in percentage points. Open calls have not reached their settlement bar yet.
+      </p>
+    </Panel>
+  );
+}
+
 export function Forecasts({
   snapshot,
   onRefresh,
@@ -41,8 +103,23 @@ export function Forecasts({
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [scorecard, setScorecard] = useState<ForecastScorecard | null>(null);
   const meta = snapshot.forecast_meta ?? DEFAULT_META;
   const groups: AgentForecast[] = snapshot.forecasts ?? [];
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<ForecastScorecard>("/api/market/forecasts/scorecard")
+      .then((data) => {
+        if (!cancelled) setScorecard(data);
+      })
+      .catch(() => {
+        if (!cancelled) setScorecard(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot.simulation.bar_index]);
   const calls = groups
     .flatMap((group) =>
       group.calls.map((call) => ({ ...call, agent_name: group.agent_name })),
@@ -58,6 +135,9 @@ export function Forecasts({
         "/api/market/forecasts/refresh",
       );
       await onRefresh();
+      void apiGet<ForecastScorecard>("/api/market/forecasts/scorecard")
+        .then(setScorecard)
+        .catch(() => undefined);
       setMessage({
         text: result.forecasts?.length
           ? "Fresh calls from the latest visible bars. No orders were placed."
@@ -72,6 +152,8 @@ export function Forecasts({
       setBusy(false);
     }
   };
+
+  const accuracy = scorecard ? <ForecastScorecardPanel scorecard={scorecard} /> : null;
 
   const tools = (
     <div className="forecast-tools">
@@ -117,6 +199,7 @@ export function Forecasts({
     return (
       <div className="forecasts">
         {tools}
+        {accuracy}
         <Panel
           title="Forecasts"
           aside={<span className="caption">{simDate(snapshot.simulation.sim_time)}</span>}
@@ -136,6 +219,7 @@ export function Forecasts({
   return (
     <div className="forecasts">
       {tools}
+      {accuracy}
       <Panel
         title="Biggest expected win"
         aside={<span className="caption">{simDate(best.sim_time)}</span>}

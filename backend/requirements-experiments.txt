@@ -1,0 +1,5 @@
+# Extra dependencies for backend/tools/experiment.py and train_ml_models.py.
+# They are intentionally separate from requirements.txt so the production
+# simulator can remain lightweight.
+numpy>=1.26,<3
+scikit-learn>=1.5,<2

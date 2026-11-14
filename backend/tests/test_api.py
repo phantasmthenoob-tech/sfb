@@ -41,6 +41,18 @@ def test_leaderboard_starts_with_four_equal_accounts(client):
     assert kinds == {"agent", "manual"}
 
 
+def test_universe_has_twelve_sectors_and_separate_etfs(client):
+    meta = client.get("/api/market/universe").json()
+    assert len(meta["stocks"]) == 120
+    assert len(meta["etfs"]) == 8
+    assert len(meta["sectors"]) == 13
+    assert all(item["kind"] == "stock" for item in meta["stocks"])
+    assert all(item["kind"] == "etf" for item in meta["etfs"])
+    assert "Political" not in meta["sectors"]
+    assert "AI adoption" in meta["exposures"]
+    assert "China exposure" in meta["exposures"]
+
+
 def test_market_endpoints_payloads(client):
     overview = client.get("/api/market/overview").json()
     assert {quote["ticker"] for quote in overview["quotes"]} == set(overview["universe"])
@@ -54,6 +66,12 @@ def test_market_endpoints_payloads(client):
     assert isinstance(refreshed_body["forecasts"], list)
     assert refreshed_body["forecast_meta"]["forecast_horizon_sessions"] == 5
 
+    scorecard = client.get("/api/market/forecasts/scorecard")
+    assert scorecard.status_code == 200
+    scorecard_body = scorecard.json()
+    assert scorecard_body["horizon_sessions"] == 5
+    assert len(scorecard_body["agents"]) == 3
+
     quote = client.get("/api/market/quote/AAPL").json()
     assert quote["price"] > 0
     assert "change_pct" in quote
@@ -64,6 +82,14 @@ def test_market_endpoints_payloads(client):
 
     news = client.get("/api/market/news/ALL").json()
     assert isinstance(news["news"], list)
+
+    sectors = client.get("/api/market/sectors")
+    assert sectors.status_code == 200
+    assert sectors.json()["sectors"]
+
+    correlations = client.get("/api/market/correlations?window=20")
+    assert correlations.status_code == 200
+    assert correlations.json()["window_sessions"] == 20
 
     assert client.get("/api/market/quote/NOPE").status_code == 404
 
@@ -134,6 +160,18 @@ def test_invalid_order_returns_reason(client):
 def test_speed_control_validation(client):
     assert client.post("/api/simulation/speed", json={"speed": 5}).status_code == 200
     assert client.post("/api/simulation/speed", json={"speed": 7}).status_code == 400
+
+
+def test_replay_range_endpoint_and_validation(client):
+    response = client.post("/api/simulation/range", json={"preset": "1w"})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["simulation"]["replay_preset"] == "1w"
+    assert payload["simulation"]["range_bars"] > 0
+    assert payload["snapshot"]["data"]["recording"]["enabled"] is True
+
+    bad = client.post("/api/simulation/range", json={"preset": "nope"})
+    assert bad.status_code == 400
 
 
 def test_simulation_reset_restores_accounts(client):

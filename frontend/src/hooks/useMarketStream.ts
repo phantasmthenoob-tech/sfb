@@ -10,6 +10,7 @@ import type {
   Quote,
   SimulationState,
   Snapshot,
+  UniverseMeta,
 } from "../types";
 
 interface OverviewResponse {
@@ -19,6 +20,7 @@ interface OverviewResponse {
   forecasts: AgentForecast[];
   forecast_meta?: ForecastMeta;
   data: DataSourceInfo;
+  universe_meta: UniverseMeta;
 }
 
 interface LeaderboardResponse {
@@ -52,6 +54,7 @@ export function useMarketStream() {
         leaderboard: leaderboard.entries,
         manual,
         data: overview.data,
+        universe_meta: overview.universe_meta,
         server_time: new Date().toISOString(),
       });
       setError(null);

@@ -50,6 +50,7 @@ export default function App() {
         onReset={() => void action("/api/simulation/reset")}
         onSpeed={(speed) => void action("/api/simulation/speed", { speed })}
         onMode={(mode) => void action("/api/simulation/mode", { mode })}
+        onRange={(preset) => void action("/api/simulation/range", { preset })}
       />
 
       <nav className="tabs" aria-label="Sections">

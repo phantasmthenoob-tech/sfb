@@ -23,7 +23,27 @@ BASE_PRICES: dict[str, float] = {
     "GOOGL": 205.60,
     "META": 612.30,
     "AMD": 155.20,
+    "JPM": 315.40,
+    "XOM": 118.70,
+    "LLY": 940.20,
+    "AVGO": 385.60,
+    "WMT": 112.30,
+    "SPY": 690.00,
+    "QQQ": 625.00,
+    "IWM": 248.00,
+    "EFA": 96.20,
+    "EEM": 57.40,
+    "GLD": 405.00,
+    "TLT": 94.50,
+    "DIA": 465.00,
 }
+
+
+def _stable_base_price(ticker: str) -> float:
+    """A deterministic fallback so synthetic runs do not depend on hash salt."""
+    seed = sum((index + 1) * ord(char) for index, char in enumerate(ticker.upper()))
+    return 40.0 + (seed % 400)
+
 
 BASE_VOLUME: dict[str, int] = {
     "AAPL": 4_200_000,
@@ -34,6 +54,19 @@ BASE_VOLUME: dict[str, int] = {
     "GOOGL": 2_600_000,
     "META": 1_900_000,
     "AMD": 5_100_000,
+    "JPM": 9_000_000,
+    "XOM": 15_000_000,
+    "LLY": 3_000_000,
+    "AVGO": 22_000_000,
+    "WMT": 8_000_000,
+    "SPY": 70_000_000,
+    "QQQ": 35_000_000,
+    "IWM": 25_000_000,
+    "EFA": 12_000_000,
+    "EEM": 20_000_000,
+    "GLD": 9_000_000,
+    "TLT": 35_000_000,
+    "DIA": 4_000_000,
 }
 
 SESSION_START = (9, 30)
@@ -112,7 +145,7 @@ def generate_bars(
 
     for ticker in tickers:
         price_rng = random.Random(f"{seed}:{ticker}")
-        base = BASE_PRICES.get(ticker, 100.0 + (abs(hash(ticker)) % 400))
+        base = BASE_PRICES.get(ticker, _stable_base_price(ticker))
         volume_base = BASE_VOLUME.get(ticker, 1_000_000)
         price = base
         daily_vol = price_rng.uniform(0.0012, 0.0028)

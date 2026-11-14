@@ -25,6 +25,7 @@ class MarketContext:
     prices: dict[str, float]
     bars: dict[str, list[dict]]
     news: list[dict]
+    sentiments: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,23 @@ class BaseAgent(ABC):
     max_entries: int = 2
     target_position_pct: float = 0.15
     target_short_pct: float = 0.10
+    allow_short: bool = True
     _last_scores: dict[str, float] = field(default_factory=dict, init=False)
+
+    def __post_init__(self) -> None:
+        """Keep subclass strategy defaults from being replaced by dataclass defaults."""
+        for name in (
+            "model_type",
+            "entry_threshold",
+            "exit_threshold",
+            "max_entries",
+            "target_position_pct",
+            "target_short_pct",
+            "allow_short",
+        ):
+            inherited = getattr(type(self), name, None)
+            if inherited is not None:
+                setattr(self, name, inherited)
 
     # -------------------------------------------------------------- strategy
     @abstractmethod
@@ -150,7 +167,7 @@ class BaseAgent(ABC):
                 if shares > 0:
                     intents.append(OrderIntent(signal.ticker, "BUY", shares))
                     entries += 1
-            elif signal.score <= -self.entry_threshold:
+            elif self.allow_short and signal.score <= -self.entry_threshold:
                 shares = self._shares_for(equity * self.target_short_pct, price)
                 if shares > 0:
                     intents.append(OrderIntent(signal.ticker, "SHORT", shares))

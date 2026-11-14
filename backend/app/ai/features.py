@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 
+from ..config import FORECAST_HORIZON_SESSIONS
 from ..market.data_processor import clamp
 
 
@@ -59,7 +60,9 @@ def technical_score(bars: list[dict]) -> dict | None:
     }
 
 
-def expected_move_pct(bars: list[dict], score: float, horizon: int = 5) -> float:
+def expected_move_pct(
+    bars: list[dict], score: float, horizon: int = FORECAST_HORIZON_SESSIONS
+) -> float:
     """Estimate the next ``horizon`` sessions' move from signal strength and volatility.
 
     The score sets the direction and conviction; recent 20-day realized
@@ -96,3 +99,47 @@ def sentiment_score(news_items: list[dict], ticker: str, min_bar: int) -> dict:
         "count": len(relevant),
         "headline": max(relevant, key=lambda item: (item["bar_index"], item["id"]))["headline"],
     }
+
+
+def sentiment_scores(
+    news_items: list[dict], tickers: tuple[str, ...], min_bar: int
+) -> dict[str, dict]:
+    """Compute the rolling sentiment for every ticker in one pass.
+
+    The simulator's universe is too large to rescan the whole news window once
+    per ticker on every bar. This keeps the exact same ticker/market weighting
+    as ``sentiment_score`` while sharing one scan across the universe.
+    """
+    totals: dict[str, list[float]] = {
+        ticker: [0.0, 0.0, 0] for ticker in tickers
+    }
+    latest: dict[str, tuple[int, int, str]] = {}
+    for item in news_items:
+        if item["bar_index"] < min_bar:
+            continue
+        ticker = item["ticker"]
+        if ticker is None:
+            for symbol in tickers:
+                cell = totals[symbol]
+                cell[0] += item["sentiment"] * 0.35
+                cell[1] += 0.35
+                cell[2] += 1
+            continue
+        cell = totals.get(ticker)
+        if cell is None:
+            continue
+        cell[0] += item["sentiment"]
+        cell[1] += 1.0
+        cell[2] += 1
+        key = (int(item["bar_index"]), int(item["id"]))
+        previous = latest.get(ticker)
+        if previous is None or key > previous[:2]:
+            latest[ticker] = (key[0], key[1], item["headline"])
+    result: dict[str, dict] = {}
+    for ticker, (total, weight, count) in totals.items():
+        result[ticker] = {
+            "score": clamp(total / weight, -1.0, 1.0) if weight else 0.0,
+            "count": count,
+            "headline": latest.get(ticker, (0, 0, None))[2],
+        }
+    return result

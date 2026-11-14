@@ -9,6 +9,7 @@ interface Props {
   onReset: () => void;
   onSpeed: (speed: number) => void;
   onMode: (mode: SimulationMode) => void;
+  onRange: (preset: string) => void;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -25,6 +26,7 @@ export function Header({
   onReset,
   onSpeed,
   onMode,
+  onRange,
 }: Props) {
   const mode = simulation?.mode ?? "replay";
   const live = simulation?.live;
@@ -47,6 +49,11 @@ export function Header({
       <div className="clock">
         <span className="clock-time">{simDate(simulation?.sim_time)}</span>
         <span className="clock-status">{statusText}</span>
+        {!isLive && simulation?.start_date && (
+          <span className="clock-window" title="Selected replay window">
+            {simDate(simulation.start_date)} – {simDate(simulation.end_date)}
+          </span>
+        )}
       </div>
 
       <div className="controls">
@@ -70,6 +77,29 @@ export function Header({
             Live
           </button>
         </div>
+
+        {!isLive && simulation?.range_options && simulation.range_options.length > 0 && (
+          <label className="range-control">
+            <span>Range</span>
+            <select
+              value={simulation.replay_preset ?? "all"}
+              onChange={(event) => onRange(event.target.value)}
+              disabled={busy}
+              aria-label="Replay date range"
+              title={
+                simulation.range_options.find(
+                  (option) => option.id === simulation.replay_preset,
+                )?.description ?? "Replay date range"
+              }
+            >
+              {simulation.range_options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {!isLive && (
           <div className="speeds" role="group" aria-label="Replay speed">

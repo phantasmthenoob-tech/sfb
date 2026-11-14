@@ -81,6 +81,35 @@ def test_manual_refresh_records_forecasts_without_orders(engine):
     assert len(engine.repo.list_orders(limit=1000)) == orders_before
 
 
+def test_matured_forecasts_are_settled_and_scored(engine):
+    engine.play()
+    for _ in range(21):
+        engine.tick()
+    engine.pause()
+
+    scorecard = engine.forecast_scorecard()
+    assert scorecard["horizon_sessions"] == 5
+    assert scorecard["settled_calls"] > 0
+    assert scorecard["open_calls"] > 0
+    assert len(scorecard["agents"]) == 3
+    for agent in scorecard["agents"]:
+        if agent["settled_calls"]:
+            assert 0 <= agent["hit_rate_pct"] <= 100
+            assert agent["avg_abs_error_pct"] >= 0
+
+    settled = [
+        row
+        for row in engine.repo.list_predictions(limit=200)
+        if row["settled_bar_index"] is not None
+    ]
+    assert len(settled) == scorecard["settled_calls"]
+    for row in settled[:10]:
+        target = engine.repo.bar(row["ticker"], int(row["settled_bar_index"]))
+        expected_actual = round((target["close"] / row["price"] - 1.0) * 100.0, 2)
+        assert row["actual_pct"] == pytest.approx(expected_actual, abs=0.01)
+        assert row["outcome"] in {"HIT", "MISS"}
+
+
 def test_latest_prediction_per_agent_is_used(engine):
     engine.play()
     for _ in range(21):
