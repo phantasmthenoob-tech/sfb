@@ -492,7 +492,7 @@ SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios,
 
 Free Render instances sleep after inactivity, stopping the clock and live polling. The backend self-pings `RENDER_EXTERNAL_URL/api/health` every minute while awake; the dashboard also sends a heartbeat, and a GitHub Actions workflow provides a fallback. These keepalive paths do not make the free service a production trading system.
 
-**Current deployment status:** the source is on `main` at `dd2d041`, but the Render backend still returned an older build (`history_range: "5y"`, 1,255 bars and `self_keepalive_seconds: 240`) when checked on 2026-11-14. The one-minute keepalive and the new experiment results are therefore not live yet. The configured backend URL is `https://sfbackend-9nsb.onrender.com`; it should not be treated as the latest release until a deployment is triggered and checked.
+**Current deployment status:** the live Neural AI and optimization commits are on `main`, and `.github/workflows/deploy.yml` can trigger both Render services once the repository deploy-hook secrets are configured. As of 2026-11-14, the Render backend still returned an older build (`self_keepalive_seconds: 60` but no `ml_autotrain` or model status). The configured backend URL is `https://sfbackend-9nsb.onrender.com`; it should not be treated as the latest release until a deploy hook is triggered and the health response is checked.
 
 ---
 
