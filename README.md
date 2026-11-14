@@ -488,6 +488,8 @@ The backend exposes REST under `/api/*`, WebSocket `/ws/market`, and OpenAPI doc
 
 SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios, positions, orders, trades, forecasts, snapshots, the simulation cursor and data-cache metadata. On a free Render filesystem the database is ephemeral; attach a disk and set `DB_PATH` for persistence.
 
+`.github/workflows/deploy.yml` can trigger both Render services from a push to `main` or manually. Add `RENDER_BACKEND_DEPLOY_HOOK` and `RENDER_FRONTEND_DEPLOY_HOOK` under **GitHub repository settings → Secrets and variables → Actions**; the workflow skips a missing hook without printing it.
+
 Free Render instances sleep after inactivity, stopping the clock and live polling. The backend self-pings `RENDER_EXTERNAL_URL/api/health` every minute while awake; the dashboard also sends a heartbeat, and a GitHub Actions workflow provides a fallback. These keepalive paths do not make the free service a production trading system.
 
 **Current deployment status:** the source is on `main` at `dd2d041`, but the Render backend still returned an older build (`history_range: "5y"`, 1,255 bars and `self_keepalive_seconds: 240`) when checked on 2026-11-14. The one-minute keepalive and the new experiment results are therefore not live yet. The configured backend URL is `https://sfbackend-9nsb.onrender.com`; it should not be treated as the latest release until a deployment is triggered and checked.

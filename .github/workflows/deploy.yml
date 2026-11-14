@@ -1,0 +1,41 @@
+name: Deploy Render services
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: render-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger backend deploy
+        env:
+          HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::RENDER_BACKEND_DEPLOY_HOOK is not set; skipping backend deploy."
+            exit 0
+          fi
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 \
+            --request POST "$HOOK" > /dev/null
+          echo "Backend deploy requested."
+
+      - name: Trigger frontend deploy
+        env:
+          HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::RENDER_FRONTEND_DEPLOY_HOOK is not set; skipping frontend deploy."
+            exit 0
+          fi
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 \
+            --request POST "$HOOK" > /dev/null
+          echo "Frontend deploy requested."

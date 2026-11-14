@@ -1550,6 +1550,19 @@ The repository includes `render.yaml` with a Python web service rooted at
 Manual settings have the same values. Set `CORS_ORIGINS` to the static site's
 exact origin, for example:
 
+#### Deploy from GitHub Actions
+
+`.github/workflows/deploy.yml` triggers Render on every push to `main` and from
+`workflow_dispatch`. Add the two Render deploy hooks under **GitHub repository
+settings → Secrets and variables → Actions**:
+
+- `RENDER_BACKEND_DEPLOY_HOOK`
+- `RENDER_FRONTEND_DEPLOY_HOOK`
+
+If a hook is missing, its step logs a notice and skips; it never prints the
+hook. Render's own automatic deploy may also be enabled, so use one mechanism
+or the other to avoid duplicate builds.
+
 ```text
 https://my-dashboard.onrender.com
 ```
