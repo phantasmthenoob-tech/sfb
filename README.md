@@ -276,7 +276,7 @@ The competition combines three **deterministic heuristic strategies** with one l
 
 **Features:** The 26 point-in-time features used by the offline neural network: technical trend, momentum, SMA cross, volatility, 5/20-day returns, news score and count, price×news, market trend, volume trend, RSI(14), range position, distance from SMA20/SMA50, 1/3/10-day returns, volatility ratio, market 5/20-day returns and volatility, relative strength versus market and sector, market breadth, and one-day news.
 
-**Training:** The model trains from bars and headlines already stored in SQLite. A chronological 80/20 split validates the network, and the final model is refit on all labeled rows up to the current replay cursor (or the latest live bar). The target is the cross-sectional percentile rank of the next five-session return. Training runs in a background thread; a failed run leaves the previous artifact active. The backend starts a run automatically when a window already has enough prior history; the full-history replay starts at bar 0, so its first model must be trained after the replay has advanced.
+**Training:** The model trains from bars and headlines already stored in SQLite. A chronological 80/20 split validates the network, and the final model is refit on all labeled rows up to the current replay cursor (or the latest live bar). The target is the cross-sectional percentile rank of the next five-session return. Training runs in a background thread; a failed run leaves the previous artifact active. The backend starts training once the cursor has enough history and retrains automatically every `ML_RETRAIN_BARS` bars by default.
 
 **Signal:** Raw predictions are ranked across the eligible universe and converted to percentiles. The signal is `2 × percentile − 1`, so the highest-ranked stock scores near `+1` and the lowest near `−1`.
 
@@ -484,7 +484,7 @@ The repository includes `render.yaml` for two services:
 - **Backend:** Python web service rooted at `backend`; build `pip install -r requirements.txt`; start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`; health check `/api/health`.
 - **Frontend:** static service; build `cd frontend && npm ci && npm run build`; publish `frontend/dist`.
 
-The backend exposes REST under `/api/*`, WebSocket `/ws/market`, and OpenAPI documentation at `/docs`. The frontend uses `VITE_API_BASE` and `VITE_WS_URL` at build time. Backend configuration includes `MARKET_DATA_SOURCE`, `MARKET_HISTORY_RANGE`, `SIM_AUTOSTART`, `SIM_MODE`, `CORS_ORIGINS`, `DB_PATH`, `MODEL_DIR` and `ML_AUTOTRAIN`. Detailed endpoints and variables are in [docs/API.md](docs/API.md) and [TECHNICAL.md](TECHNICAL.md) rather than this report.
+The backend exposes REST under `/api/*`, WebSocket `/ws/market`, and OpenAPI documentation at `/docs`. The frontend uses `VITE_API_BASE` and `VITE_WS_URL` at build time. Backend configuration includes `MARKET_DATA_SOURCE`, `MARKET_HISTORY_RANGE`, `SIM_AUTOSTART`, `SIM_MODE`, `CORS_ORIGINS`, `DB_PATH`, `MODEL_DIR`, `ML_AUTOTRAIN` and `ML_RETRAIN_BARS`. Detailed endpoints and variables are in [docs/API.md](docs/API.md) and [TECHNICAL.md](TECHNICAL.md) rather than this report.
 
 SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios, positions, orders, trades, forecasts, snapshots, the simulation cursor and data-cache metadata. On a free Render filesystem the database is ephemeral; attach a disk and set `DB_PATH` for persistence.
 
@@ -492,7 +492,7 @@ SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios,
 
 Free Render instances sleep after inactivity, stopping the clock and live polling. The backend self-pings `RENDER_EXTERNAL_URL/api/health` every minute while awake; the dashboard also sends a heartbeat, and a GitHub Actions workflow provides a fallback. These keepalive paths do not make the free service a production trading system.
 
-**Current deployment status:** the live Neural AI and optimization commits are on `main`, and `.github/workflows/deploy.yml` can trigger both Render services once the repository deploy-hook secrets are configured. As of 2026-11-14, the Render backend still returned an older build (`self_keepalive_seconds: 60` but no `ml_autotrain` or model status). The configured backend URL is `https://sfbackend-9nsb.onrender.com`; it should not be treated as the latest release until a deploy hook is triggered and the health response is checked.
+**Current deployment status:** the backend is live at `https://sfb-sojq.onrender.com`, with `/api/models/status` reporting the ready Neural AI artifact, automatic retraining enabled, and Price, News, Combined and Neural agents competing in the running replay. The configured dashboard origin is `https://subdomains.html-5.me`; rebuild it with `VITE_API_BASE=https://sfb-sojq.onrender.com` and `VITE_WS_URL=wss://sfb-sojq.onrender.com/ws/market`.
 
 ---
 

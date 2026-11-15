@@ -1499,7 +1499,8 @@ while their action is in flight.
 | `LIVE_DECISION_SECONDS` | `300` | Agent re-evaluation interval in live mode. |
 | `DB_PATH` | `backend/data/simulation.db` | SQLite file path. |
 | `MODEL_DIR` | `backend/data/models` | Directory for the atomic `neural_network.pkl` artifact. Use a persistent disk in production. |
-| `ML_AUTOTRAIN` | `1` | Train Neural AI automatically when no artifact exists and the cursor has enough history. |
+| `ML_AUTOTRAIN` | `1` | Train Neural AI automatically once the cursor has enough history. |
+| `ML_RETRAIN_BARS` | `60` | Retrain the ready model automatically after this many additional replay bars. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
 
 Some values are read at import/startup time. Restart the backend after changing

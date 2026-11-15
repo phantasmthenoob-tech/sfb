@@ -157,20 +157,31 @@ class SimulationEngine:
         self._maybe_autotrain()
 
     def _maybe_autotrain(self) -> None:
-        """Train once on history visible at the current cursor.
+        """Train on history visible at the current cursor, then retrain periodically.
 
         A short replay window can start with years of prior bars, so the model
         can be trained as of the window start and used for the unseen remainder.
-        The full-history replay starts at bar 0 and therefore waits for an
-        explicit retrain; training there would either use future bars or fail.
+        The full-history replay starts at bar 0 and retrains every
+        ``ml_retrain_bars`` once it has enough history. Training only uses bars
+        at or before the cursor, so a new artifact never sees future bars.
         """
         if (
             not self.settings.ml_autotrain
             or self.settings.data_source == "synthetic"
-            or self.models.status()["ready"]
             or self.cursor < 60
         ):
             return
+        status = self.models.status()
+        if status.get("ready"):
+            try:
+                trained_through = int(status.get("trained_through_bar"))
+            except (TypeError, ValueError):
+                trained_through = None
+            if (
+                trained_through is not None
+                and self.cursor - trained_through < max(1, self.settings.ml_retrain_bars)
+            ):
+                return
         self.models.start_training(self.cursor)
 
     def _cache_covers_universe(self, cache: dict | None) -> bool:
@@ -566,6 +577,7 @@ class SimulationEngine:
 
         self._take_snapshots(sim_time)
         self._persist()
+        self._maybe_autotrain()
         if next_index >= self.range_end:
             self._complete()
         return True

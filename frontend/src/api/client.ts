@@ -2,7 +2,7 @@
 // not provide VITE_API_BASE, production falls back to the deployed API so a
 // plain `npm run build` still produces a working site. Local development keeps
 // using Vite's same-origin proxy.
-const PRODUCTION_API_BASE = "https://sfbackend-9nsb.onrender.com";
+const PRODUCTION_API_BASE = "https://sfb-sojq.onrender.com";
 const configuredBase = (import.meta.env.VITE_API_BASE ?? "").trim();
 const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 const API_BASE = (

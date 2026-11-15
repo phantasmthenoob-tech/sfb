@@ -78,6 +78,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     """All simulation knobs in one place.
@@ -161,6 +168,9 @@ class Settings:
         default_factory=lambda: os.environ.get("ML_AUTOTRAIN", "1").lower()
         not in ("0", "false", "no")
     )
+    ml_retrain_bars: int = field(
+        default_factory=lambda: max(1, _env_int("ML_RETRAIN_BARS", 60))
+    )
 
     def as_public_dict(self) -> dict:
         return {
@@ -186,4 +196,5 @@ class Settings:
             "live_decision_seconds": self.live_decision_seconds,
             "self_keepalive_seconds": self.self_keepalive_seconds,
             "ml_autotrain": self.ml_autotrain,
+            "ml_retrain_bars": self.ml_retrain_bars,
         }

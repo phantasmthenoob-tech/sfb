@@ -133,8 +133,8 @@ export function Models() {
               A freshly trained model is used by Neural AI on its next decision.
               No model means Neural AI stays idle; the other three agents keep
               trading normally. The default full-history replay starts at bar 0,
-              so let it advance before retraining; shorter windows can train at
-              their start when enough prior history exists.
+              trains automatically once it has enough history, and then retrains
+              automatically as the replay advances.
             </p>
           </>
         )}
