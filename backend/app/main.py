@@ -5,12 +5,18 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import agents, market, models, orders, portfolios, simulation
-from .config import Settings
+from .config import (
+    Settings,
+    default_model_dir,
+    resolve_db_path,
+    resolve_storage_dir,
+)
 from .database.database import Database
 from .database.repositories import Repository
 from .services.event_manager import EventManager
@@ -32,6 +38,13 @@ def cors_origins() -> list[str]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    # A deployment can configure DB/model paths on a missing or read-only disk.
+    # Resolve them before startup so the app boots on its writable data dir.
+    settings = replace(
+        settings,
+        db_path=resolve_db_path(settings.db_path),
+        model_dir=resolve_storage_dir(settings.model_dir, default_model_dir()),
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

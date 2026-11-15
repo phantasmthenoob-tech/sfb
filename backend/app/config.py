@@ -1,6 +1,7 @@
 """Runtime configuration for the market simulation backend."""
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,9 +19,56 @@ SPEED_OPTIONS: tuple[int, ...] = (1, 5, 10, 30)
 FORECAST_HORIZON_SESSIONS = 5
 
 
+logger = logging.getLogger(__name__)
+
+
+def default_data_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "data"
+
+
+def default_db_path() -> str:
+    return str(default_data_dir() / "simulation.db")
+
+
+def default_model_dir() -> str:
+    return str(default_data_dir() / "models")
+
+
+def _writable_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return os.access(path, os.W_OK | os.X_OK)
+
+
+def resolve_storage_dir(configured: str | None, fallback: str) -> str:
+    """Return a writable directory, falling back when the configured one fails.
+
+    Render disks are optional: a deployment may set ``DB_PATH`` or
+    ``MODEL_DIR`` under ``/var/data`` without attaching a disk. Instead of
+    crashing at startup, fall back to the application's writable data
+    directory and log the substitution.
+    """
+    candidates = [Path(configured)] if configured else []
+    candidates.append(Path(fallback))
+    for candidate in candidates:
+        if _writable_dir(candidate):
+            return str(candidate)
+        logger.warning("Storage directory is not writable; skipping: %s", candidate)
+    raise PermissionError(f"No writable storage directory available: {candidates}")
+
+
+def resolve_db_path(configured: str | None) -> str:
+    fallback = Path(default_db_path())
+    if not configured:
+        return str(fallback)
+    directory = resolve_storage_dir(str(Path(configured).parent), str(fallback.parent))
+    return str(Path(directory) / Path(configured).name)
+
+
 def _default_db_path() -> str:
-    base = Path(__file__).resolve().parent.parent / "data"
-    return str(base / "simulation.db")
+    return default_db_path()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -39,7 +87,7 @@ class Settings:
     """
 
     starting_balance: float = 10_000.0
-    db_path: str = field(default_factory=lambda: os.environ.get("DB_PATH", _default_db_path()))
+    db_path: str = field(default_factory=lambda: os.environ.get("DB_PATH", default_db_path()))
 
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
 
@@ -107,9 +155,7 @@ class Settings:
     # Live neural-network model. The model is trained from the bars already in
     # SQLite, so a deployment can rebuild it without a separate research job.
     model_dir: str = field(
-        default_factory=lambda: os.environ.get(
-            "MODEL_DIR", str(Path(__file__).resolve().parent.parent / "data" / "models")
-        )
+        default_factory=lambda: os.environ.get("MODEL_DIR", default_model_dir())
     )
     ml_autotrain: bool = field(
         default_factory=lambda: os.environ.get("ML_AUTOTRAIN", "1").lower()
