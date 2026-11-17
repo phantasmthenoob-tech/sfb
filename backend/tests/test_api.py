@@ -245,6 +245,24 @@ def test_cors_allows_configured_static_origins(tmp_path, monkeypatch):
         assert "access-control-allow-origin" not in blocked.headers
 
 
+def test_cors_allows_builtin_production_dashboard_origin(tmp_path, monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://old-dashboard.example.com")
+    app = create_app(make_settings(tmp_path))
+    with TestClient(app) as client:
+        preflight = client.options(
+            "/api/leaderboard",
+            headers={
+                "Origin": "https://stockmarketpredictionthing.lovestoblog.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert preflight.status_code == 200
+        assert (
+            preflight.headers["access-control-allow-origin"]
+            == "https://stockmarketpredictionthing.lovestoblog.com"
+        )
+
+
 def test_cors_origins_default_to_wildcard(monkeypatch):
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     assert cors_origins() == ["*"]

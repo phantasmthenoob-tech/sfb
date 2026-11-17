@@ -31,11 +31,10 @@ services:
       # The backend pings RENDER_EXTERNAL_URL/api/health while awake.
       - key: SELF_KEEPALIVE_SECONDS
         value: "60"
-      # Comma-separated exact browser origins, e.g.
-      # https://my-dashboard.onrender.com,https://preview.example.com
-      # Set this in the Render dashboard after the static site URL is known.
+      # Comma-separated exact browser origins (no trailing slashes).
+      # The backend also allows its built-in production dashboard origins.
       - key: CORS_ORIGINS
-        sync: false
+        value: https://stockmarketpredictionthing.lovestoblog.com,https://subdomains.html-5.me
 
   - type: web
     name: ai-market-simulator-dashboard

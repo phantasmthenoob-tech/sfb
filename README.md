@@ -492,7 +492,7 @@ SQLite uses WAL mode and stores market bars, simulated news, agents, portfolios,
 
 Free Render instances sleep after inactivity, stopping the clock and live polling. The backend self-pings `RENDER_EXTERNAL_URL/api/health` every minute while awake; the dashboard also sends a heartbeat, and a GitHub Actions workflow provides a fallback. These keepalive paths do not make the free service a production trading system.
 
-**Current deployment status:** the backend is live at `https://sfb-sojq.onrender.com`, with `/api/models/status` reporting the ready Neural AI artifact, automatic retraining enabled, and Price, News, Combined and Neural agents competing in the running replay. The configured dashboard origin is `https://subdomains.html-5.me`; rebuild it with `VITE_API_BASE=https://sfb-sojq.onrender.com` and `VITE_WS_URL=wss://sfb-sojq.onrender.com/ws/market`.
+**Current deployment status:** the backend is live at `https://sfb-sojq.onrender.com`, with `/api/models/status` reporting the ready Neural AI artifact, automatic retraining enabled, and Price, News, Combined and Neural agents competing in the running replay. The configured dashboard origin is `https://stockmarketpredictionthing.lovestoblog.com`; rebuild it with `VITE_API_BASE=https://sfb-sojq.onrender.com` and `VITE_WS_URL=wss://sfb-sojq.onrender.com/ws/market`.
 
 ---
 

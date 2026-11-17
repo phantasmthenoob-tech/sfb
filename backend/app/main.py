@@ -28,12 +28,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Production dashboards that may call the API even when the deployment still
+# has an older CORS_ORIGINS value. Add new first-party origins here so a
+# dashboard hosting move does not require a coordinated environment change.
+BUILTIN_FRONTEND_ORIGINS = (
+    "https://stockmarketpredictionthing.lovestoblog.com",
+    "https://subdomains.html-5.me",
+)
+
 
 def cors_origins() -> list[str]:
     """Parse CORS_ORIGINS into exact origins (comma-separated, no trailing slash)."""
     raw = os.environ.get("CORS_ORIGINS", "*")
     origins = [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
-    return origins or ["*"]
+    if not origins or "*" in origins:
+        return ["*"]
+    for origin in BUILTIN_FRONTEND_ORIGINS:
+        if origin not in origins:
+            origins.append(origin)
+    return origins
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
